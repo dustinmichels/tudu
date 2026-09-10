@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct List {
@@ -129,6 +129,33 @@ pub struct Reminder {
     pub deleted_at: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TaskDetail {
+    #[serde(flatten)]
+    pub task: Task,
+    pub tags: Vec<Tag>,
+    pub notes: Vec<Note>,
+    pub subtasks: Vec<Task>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BatchUpdateTasksInput {
+    pub task_ids: Vec<String>,
+    pub completed: Option<bool>,
+    pub postpone_days: Option<i64>,
+    pub due: Option<String>,
+    pub list_id: Option<String>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub priority: Option<Option<i64>>,
+}
+
+fn double_option<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: Deserialize<'de>,
+    D: Deserializer<'de>,
+{
+    Deserialize::deserialize(deserializer).map(Some)
+}
 // ---------------------------------------------------------------------------
 // OpenTask v1.0 Interchange Specification Types (matching opentask-v1.json)
 // ---------------------------------------------------------------------------
@@ -328,5 +355,31 @@ pub fn completed_to_status(completed: bool, current_status: Option<&str>) -> Str
         }
     } else {
         "needs_action".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_batch_update_tasks_input_serde() {
+        // 1. Omitted priority -> None
+        let json_omitted = r#"{"task_ids": ["t1"]}"#;
+        let parsed_omitted: BatchUpdateTasksInput =
+            serde_json::from_str(json_omitted).expect("parse omitted priority");
+        assert_eq!(parsed_omitted.priority, None);
+
+        // 2. Explicit null -> Some(None) (clear priority / Priority None)
+        let json_null = r#"{"task_ids": ["t1"], "priority": null}"#;
+        let parsed_null: BatchUpdateTasksInput =
+            serde_json::from_str(json_null).expect("parse null priority");
+        assert_eq!(parsed_null.priority, Some(None));
+
+        // 3. Concrete priority -> Some(Some(1))
+        let json_priority = r#"{"task_ids": ["t1"], "priority": 1}"#;
+        let parsed_priority: BatchUpdateTasksInput =
+            serde_json::from_str(json_priority).expect("parse concrete priority");
+        assert_eq!(parsed_priority.priority, Some(Some(1)));
     }
 }

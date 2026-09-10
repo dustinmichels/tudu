@@ -29,7 +29,30 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0002_opentask_alignment",
         sql: include_str!("../migrations/0002_opentask_alignment.sql"),
     },
+    Migration {
+        version: 3,
+        name: "0003_default_inbox",
+        sql: include_str!("../migrations/0003_default_inbox.sql"),
+    },
 ];
+
+pub async fn ensure_default_inbox(conn: &Connection) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let mut rows = conn
+        .query("SELECT id FROM lists WHERE lower(name) = 'inbox' AND deleted_at IS NULL LIMIT 1", ())
+        .await?;
+    if let Some(row) = rows.next().await? {
+        let id: String = row.get(0)?;
+        return Ok(id);
+    }
+
+    let id = "00000000-0000-0000-0000-000000000001".to_string();
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    conn.execute(
+        "INSERT OR IGNORE INTO lists (id, name, color, position, created_at, updated_at) VALUES (?1, 'Inbox', '#3b82f6', 0, ?2, ?2)",
+        params![id.clone(), now],
+    ).await?;
+    Ok(id)
+}
 
 pub async fn run_migrations(conn: &Connection) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     conn.execute_batch(
@@ -73,6 +96,8 @@ pub async fn init_db(db_path: &Path) -> Result<DbState, Box<dyn std::error::Erro
     conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;").await?;
 
     run_migrations(&conn).await?;
+    ensure_default_inbox(&conn).await?;
+
 
     Ok(DbState {
         db: Arc::new(db),

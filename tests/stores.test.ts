@@ -251,7 +251,7 @@ describe("Pinia List Store (useListStore)", () => {
 		store.lists = [
 			{
 				id: "l1",
-				name: "Inbox",
+				name: "Work",
 				color: null,
 				position: 0,
 				created_at: "2026-01-01",
@@ -260,7 +260,7 @@ describe("Pinia List Store (useListStore)", () => {
 			},
 			{
 				id: "l2",
-				name: "Work",
+				name: "Personal",
 				color: null,
 				position: 1,
 				created_at: "2026-01-01",
@@ -275,6 +275,24 @@ describe("Pinia List Store (useListStore)", () => {
 		expect(store.lists.length).toBe(1);
 		expect(store.lists[0]?.id).toBe("l2");
 		expect(store.activeListId).toBe("l2");
+	});
+
+	test("deleteList prevents deleting the default Inbox list", async () => {
+		const store = useListStore();
+		store.lists = [
+			{
+				id: "inbox-1",
+				name: "Inbox",
+				color: null,
+				position: 0,
+				created_at: "2026-01-01",
+				updated_at: "2026-01-01",
+				deleted_at: null,
+			},
+		];
+		await expect(store.deleteList("inbox-1")).rejects.toThrow(
+			"Cannot delete the default Inbox list",
+		);
 	});
 });
 

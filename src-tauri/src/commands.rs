@@ -7,9 +7,9 @@ use uuid::Uuid;
 
 use crate::db::DbState;
 use crate::models::{
-    opentask_to_priority, priority_to_opentask, status_to_completed, GeoLocation, List, Note,
-    OpenTaskDocument, OpenTaskNote, OpenTaskReminder, OpenTaskTag, OpenTaskTask,
-    OpenTaskTaskList, Reminder, Tag, Task,
+    opentask_to_priority, priority_to_opentask, status_to_completed, BatchUpdateTasksInput,
+    GeoLocation, List, Note, OpenTaskDocument, OpenTaskNote, OpenTaskReminder, OpenTaskTag,
+    OpenTaskTask, OpenTaskTaskList, Reminder, Tag, Task, TaskDetail,
 };
 
 pub const LIST_SELECT_COLS: &str =
@@ -219,8 +219,126 @@ pub async fn create_list(
 ) -> Result<List, String> {
     create_list_impl(&state.conn, name, color).await
 }
+pub async fn update_list_impl(
+    conn: &Connection,
+    id: String,
+    name: Option<String>,
+    color: Option<Option<String>>,
+    position: Option<i64>,
+) -> Result<List, String> {
+    let mut rows = conn
+        .query(
+            "SELECT name FROM lists WHERE id = ?1 AND deleted_at IS NULL",
+            params![id.clone()],
+        )
+        .await
+        .map_err(|e| format!("Failed to query list: {}", e))?;
+
+    let current_name = if let Some(row) = rows
+        .next()
+        .await
+        .map_err(|e| format!("Failed to read list row: {}", e))?
+    {
+        row.get::<String>(0).map_err(|e| format!("Failed to read list name: {}", e))?
+    } else {
+        return Err(format!("List with ID '{}' not found", id));
+    };
+
+    let mut sets = Vec::new();
+    let mut query_params: Vec<libsql::Value> = vec![libsql::Value::Text(id.clone())];
+
+    if let Some(new_name) = name {
+        let trimmed = new_name.trim().to_string();
+        if trimmed.is_empty() {
+            return Err("List name cannot be empty".to_string());
+        }
+        if current_name.eq_ignore_ascii_case("inbox") && !trimmed.eq_ignore_ascii_case("inbox") {
+            return Err("Cannot rename the default Inbox list".to_string());
+        }
+        query_params.push(libsql::Value::Text(trimmed));
+        sets.push(format!("name = ?{}", query_params.len()));
+    }
+
+    if let Some(new_color) = color {
+        match new_color {
+            Some(c) => query_params.push(libsql::Value::Text(c)),
+            None => query_params.push(libsql::Value::Null),
+        }
+        sets.push(format!("color = ?{}", query_params.len()));
+    }
+
+    if let Some(new_pos) = position {
+        query_params.push(libsql::Value::Integer(new_pos));
+        sets.push(format!("position = ?{}", query_params.len()));
+    }
+
+    let now = now_iso();
+    query_params.push(libsql::Value::Text(now.clone()));
+    sets.push(format!("updated_at = ?{}", query_params.len()));
+
+    let query_str = format!(
+        "UPDATE lists SET {} WHERE id = ?1 AND deleted_at IS NULL",
+        sets.join(", ")
+    );
+
+    conn.execute(&query_str, query_params)
+        .await
+        .map_err(|e| format!("Failed to update list: {}", e))?;
+
+    let fetch_query = format!(
+        "SELECT {} FROM lists WHERE id = ?1 AND deleted_at IS NULL",
+        LIST_SELECT_COLS
+    );
+    let mut fetch_rows = conn
+        .query(&fetch_query, params![id.clone()])
+        .await
+        .map_err(|e| format!("Failed to fetch updated list: {}", e))?;
+
+    if let Some(row) = fetch_rows
+        .next()
+        .await
+        .map_err(|e| format!("Failed to read list row: {}", e))?
+    {
+        row_to_list(&row).map_err(|e| format!("Failed to parse list: {}", e))
+    } else {
+        Err(format!("List with ID '{}' not found after update", id))
+    }
+}
+
+#[tauri::command]
+pub async fn update_list(
+    state: State<'_, DbState>,
+    id: String,
+    name: Option<String>,
+    color: Option<Option<String>>,
+    position: Option<i64>,
+) -> Result<List, String> {
+    update_list_impl(&state.conn, id, name, color, position).await
+}
+
 
 pub async fn delete_list_impl(conn: &Connection, id: String) -> Result<(), String> {
+    let mut rows = conn
+        .query(
+            "SELECT name FROM lists WHERE id = ?1 AND deleted_at IS NULL",
+            params![id.clone()],
+        )
+        .await
+        .map_err(|e| format!("Failed to query list: {}", e))?;
+
+    if let Some(row) = rows
+        .next()
+        .await
+        .map_err(|e| format!("Failed to read list row: {}", e))?
+    {
+        let name: String = row
+            .get(0)
+            .map_err(|e| format!("Failed to read list name: {}", e))?;
+        if name.eq_ignore_ascii_case("inbox") {
+            return Err("Cannot delete the default Inbox list".to_string());
+        }
+    }
+
     let now = now_iso();
     conn.execute(
         "UPDATE lists SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1 AND deleted_at IS NULL",
@@ -242,33 +360,138 @@ pub async fn delete_list(state: State<'_, DbState>, id: String) -> Result<(), St
 
 pub async fn get_tasks_impl(
     conn: &Connection,
-    list_id: String,
+    list_id: Option<String>,
     include_completed: Option<bool>,
+    view: Option<String>,
+    tag: Option<String>,
+    due_from: Option<String>,
+    due_to: Option<String>,
+    parent_id: Option<Option<String>>,
 ) -> Result<Vec<Task>, String> {
     let include_completed = include_completed.unwrap_or(false);
-
-    let query_str = if include_completed {
-        format!(
-            "SELECT {}
-             FROM tasks
-             WHERE list_id = ?1 AND deleted_at IS NULL
-             ORDER BY completed ASC, priority ASC, due ASC, created_at ASC",
-            TASK_SELECT_COLS
-        )
+    let is_trash = matches!(view.as_deref().map(|v| v.trim().to_lowercase()).as_deref(), Some("trash"));
+    let mut conditions = if is_trash {
+        vec!["t.deleted_at IS NOT NULL".to_string()]
     } else {
-        format!(
-            "SELECT {}
-             FROM tasks
-             WHERE list_id = ?1 AND completed = 0 AND deleted_at IS NULL
-             ORDER BY priority ASC, due ASC, created_at ASC",
-            TASK_SELECT_COLS
-        )
+        vec!["t.deleted_at IS NULL".to_string()]
     };
+    let mut param_values: Vec<libsql::Value> = Vec::new();
 
-    let mut rows = conn
-        .query(&query_str, params![list_id])
-        .await
-        .map_err(|e| format!("Failed to query tasks: {}", e))?;
+    if let Some(lid) = &list_id {
+        if !lid.trim().is_empty() {
+            param_values.push(libsql::Value::Text(lid.clone()));
+            conditions.push(format!("t.list_id = ?{}", param_values.len()));
+        }
+    }
+
+    if let Some(tag_filter) = &tag {
+        let trimmed = tag_filter.trim();
+        if !trimmed.is_empty() {
+            param_values.push(libsql::Value::Text(trimmed.to_string()));
+            conditions.push(format!(
+                "EXISTS (
+                    SELECT 1 FROM task_tags tt
+                    JOIN tags tg ON tg.id = tt.tag_id
+                    WHERE tt.task_id = t.id
+                      AND tt.deleted_at IS NULL
+                      AND tg.deleted_at IS NULL
+                      AND (tg.id = ?{p} OR tg.name = ?{p})
+                )",
+                p = param_values.len()
+            ));
+        }
+    }
+
+    if let Some(df) = &due_from {
+        let trimmed = df.trim();
+        if !trimmed.is_empty() {
+            param_values.push(libsql::Value::Text(trimmed.to_string()));
+            conditions.push(format!("(t.due IS NOT NULL AND date(t.due) >= date(?{}))", param_values.len()));
+        }
+    }
+
+    if let Some(dt) = &due_to {
+        let trimmed = dt.trim();
+        if !trimmed.is_empty() {
+            param_values.push(libsql::Value::Text(trimmed.to_string()));
+            conditions.push(format!("(t.due IS NOT NULL AND date(t.due) <= date(?{}))", param_values.len()));
+        }
+    }
+
+    if let Some(pid_opt) = &parent_id {
+        match pid_opt {
+            Some(pid) if !pid.trim().is_empty() => {
+                param_values.push(libsql::Value::Text(pid.clone()));
+                conditions.push(format!("t.parent_id = ?{}", param_values.len()));
+            }
+            _ => {
+                conditions.push("t.parent_id IS NULL".to_string());
+            }
+        }
+    }
+
+    if let Some(v) = &view {
+        match v.trim().to_lowercase().as_str() {
+            "today" => {
+                if include_completed {
+                    conditions.push("(t.due IS NOT NULL AND ((t.completed = 0 AND date(t.due) <= date('now', 'localtime')) OR (t.completed = 1 AND date(t.due) = date('now', 'localtime'))))".to_string());
+                } else {
+                    conditions.push("(t.completed = 0 AND t.due IS NOT NULL AND date(t.due) <= date('now', 'localtime'))".to_string());
+                }
+            }
+            "tomorrow" => {
+                if !include_completed {
+                    conditions.push("t.completed = 0".to_string());
+                }
+                conditions.push("(t.due IS NOT NULL AND date(t.due) = date('now', 'localtime', '+1 day'))".to_string());
+            }
+            "this_week" => {
+                if include_completed {
+                    conditions.push("(t.due IS NOT NULL AND ((t.completed = 0 AND date(t.due) <= date('now', 'localtime', '+7 days')) OR (t.completed = 1 AND date(t.due) >= date('now', 'localtime') AND date(t.due) <= date('now', 'localtime', '+7 days'))))".to_string());
+                } else {
+                    conditions.push("(t.completed = 0 AND t.due IS NOT NULL AND date(t.due) <= date('now', 'localtime', '+7 days'))".to_string());
+                }
+            }
+            "trash" => {
+                if !include_completed {
+                    conditions.push("t.completed = 0".to_string());
+                }
+            }
+            "all" => {
+                if !include_completed {
+                    conditions.push("t.completed = 0".to_string());
+                }
+            }
+            _ => {
+                if !include_completed {
+                    conditions.push("t.completed = 0".to_string());
+                }
+            }
+        }
+    } else if !include_completed {
+        conditions.push("t.completed = 0".to_string());
+    }
+
+    let where_str = conditions.join(" AND ");
+    let cols_with_prefix = TASK_SELECT_COLS
+        .split(',')
+        .map(|col| format!("t.{}", col.trim()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let query_str = format!(
+        "SELECT {} FROM tasks t WHERE {} ORDER BY t.completed ASC, t.priority ASC, t.due ASC, t.created_at ASC",
+        cols_with_prefix, where_str
+    );
+
+    let mut rows = if param_values.is_empty() {
+        conn.query(&query_str, ())
+            .await
+            .map_err(|e| format!("Failed to query tasks: {}", e))?
+    } else {
+        conn.query(&query_str, param_values)
+            .await
+            .map_err(|e| format!("Failed to query tasks: {}", e))?
+    };
 
     let mut tasks = Vec::new();
     while let Some(row) = rows
@@ -285,10 +508,94 @@ pub async fn get_tasks_impl(
 #[tauri::command]
 pub async fn get_tasks(
     state: State<'_, DbState>,
-    list_id: String,
+    list_id: Option<String>,
     include_completed: Option<bool>,
+    view: Option<String>,
+    tag: Option<String>,
+    due_from: Option<String>,
+    due_to: Option<String>,
+    parent_id: Option<Option<String>>,
 ) -> Result<Vec<Task>, String> {
-    get_tasks_impl(&state.conn, list_id, include_completed).await
+    get_tasks_impl(
+        &state.conn,
+        list_id,
+        include_completed,
+        view,
+        tag,
+        due_from,
+        due_to,
+        parent_id,
+    )
+    .await
+}
+
+pub async fn get_task_detail_impl(
+    conn: &Connection,
+    id: String,
+) -> Result<Option<TaskDetail>, String> {
+    let task = match fetch_task_by_id(conn, &id).await? {
+        Some(t) => t,
+        None => return Ok(None),
+    };
+
+    // Tags associated with this task
+    let mut tag_rows = conn
+        .query(
+            "SELECT t.id, t.name, t.color, t.created_at, t.updated_at, t.deleted_at
+             FROM tags t
+             INNER JOIN task_tags tt ON t.id = tt.tag_id
+             WHERE tt.task_id = ?1 AND tt.deleted_at IS NULL AND t.deleted_at IS NULL
+             ORDER BY t.name ASC",
+            params![id.clone()],
+        )
+        .await
+        .map_err(|e| format!("Failed to query task tags: {}", e))?;
+
+    let mut tags = Vec::new();
+    while let Some(row) = tag_rows
+        .next()
+        .await
+        .map_err(|e| format!("Failed to read tag row: {}", e))?
+    {
+        tags.push(row_to_tag(&row).map_err(|e| format!("Failed to parse tag: {}", e))?);
+    }
+
+    // Notes for this task
+    let notes = get_notes_impl(conn, id.clone()).await?;
+
+    // Subtasks for this task
+    let subtask_query = format!(
+        "SELECT {} FROM tasks WHERE parent_id = ?1 AND deleted_at IS NULL ORDER BY completed ASC, priority ASC, due ASC, created_at ASC",
+        TASK_SELECT_COLS
+    );
+    let mut subtask_rows = conn
+        .query(&subtask_query, params![id])
+        .await
+        .map_err(|e| format!("Failed to query subtasks: {}", e))?;
+
+    let mut subtasks = Vec::new();
+    while let Some(row) = subtask_rows
+        .next()
+        .await
+        .map_err(|e| format!("Failed to read subtask row: {}", e))?
+    {
+        subtasks.push(row_to_task(&row).map_err(|e| format!("Failed to parse subtask: {}", e))?);
+    }
+
+    Ok(Some(TaskDetail {
+        task,
+        tags,
+        notes,
+        subtasks,
+    }))
+}
+
+#[tauri::command]
+pub async fn get_task_detail(
+    state: State<'_, DbState>,
+    id: String,
+) -> Result<Option<TaskDetail>, String> {
+    get_task_detail_impl(&state.conn, id).await
 }
 
 pub async fn create_task_impl(
@@ -304,10 +611,24 @@ pub async fn create_task_impl(
         return Err("Task title cannot be empty".to_string());
     }
 
+    let target_list_id = if list_id.trim().is_empty() {
+        let mut inbox_rows = conn
+            .query("SELECT id FROM lists WHERE lower(name) = 'inbox' AND deleted_at IS NULL LIMIT 1", ())
+            .await
+            .map_err(|e| format!("Failed to find Inbox list: {}", e))?;
+        if let Some(row) = inbox_rows.next().await.map_err(|e| format!("Failed to fetch inbox: {}", e))? {
+            row.get::<String>(0).map_err(|e| format!("Failed to get inbox id: {}", e))?
+        } else {
+            return Err("No list specified and default Inbox list not found".to_string());
+        }
+    } else {
+        list_id.clone()
+    };
+
     let mut list_rows = conn
         .query(
             "SELECT id FROM lists WHERE id = ?1 AND deleted_at IS NULL",
-            params![list_id.clone()],
+            params![target_list_id.clone()],
         )
         .await
         .map_err(|e| format!("Failed to verify list: {}", e))?;
@@ -318,8 +639,9 @@ pub async fn create_task_impl(
         .map_err(|e| format!("Failed to fetch list row: {}", e))?
         .is_none()
     {
-        return Err(format!("List with ID '{}' does not exist", list_id));
+        return Err(format!("List with ID '{}' does not exist", target_list_id));
     }
+    let list_id = target_list_id;
 
     if let Some(pid) = &parent_id {
         let mut parent_rows = conn
@@ -848,6 +1170,154 @@ pub async fn toggle_task_complete(
     toggle_task_complete_impl(&state.conn, id, completed).await
 }
 
+pub async fn batch_update_tasks_impl(
+    conn: &Connection,
+    input: BatchUpdateTasksInput,
+) -> Result<Vec<Task>, String> {
+    if input.task_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Validate list_id if provided
+    if let Some(lid) = &input.list_id {
+        let mut list_rows = conn
+            .query(
+                "SELECT id FROM lists WHERE id = ?1 AND deleted_at IS NULL",
+                params![lid.clone()],
+            )
+            .await
+            .map_err(|e| format!("Failed to verify list: {}", e))?;
+        if list_rows
+            .next()
+            .await
+            .map_err(|e| format!("Failed to read list row: {}", e))?
+            .is_none()
+        {
+            return Err(format!("List with ID '{}' does not exist", lid));
+        }
+    }
+
+    // Validate priority if provided
+    if let Some(Some(p)) = input.priority {
+        if !(1..=3).contains(&p) {
+            return Err("Priority must be 1, 2, 3, or null".to_string());
+        }
+    }
+
+    let now = now_iso();
+    let mut updated_tasks = Vec::new();
+
+    for id in &input.task_ids {
+        let existing = match fetch_task_by_id(conn, id).await? {
+            Some(t) => t,
+            None => continue,
+        };
+
+        let mut sets = Vec::new();
+        let mut query_params: Vec<libsql::Value> = vec![libsql::Value::Text(id.clone())];
+
+        if let Some(completed) = input.completed {
+            let (completed_int, completed_at, status) = if completed {
+                (1i64, Some(now.clone()), "completed")
+            } else {
+                (0i64, None, "needs_action")
+            };
+            query_params.push(libsql::Value::Integer(completed_int));
+            sets.push(format!("completed = ?{}", query_params.len()));
+
+            match completed_at {
+                Some(ca) => query_params.push(libsql::Value::Text(ca)),
+                None => query_params.push(libsql::Value::Null),
+            }
+            sets.push(format!("completed_at = ?{}", query_params.len()));
+
+            query_params.push(libsql::Value::Text(status.to_string()));
+            sets.push(format!("status = ?{}", query_params.len()));
+        }
+
+        if let Some(days) = input.postpone_days {
+            // Base calculation: from existing due if present (RFC3339 or YYYY-MM-DD), else from now (UTC)
+            let (base_datetime, is_date_only) = if let Some(due_str) = &existing.due {
+                let trimmed = due_str.trim();
+                if let Ok(naive_date) = chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d") {
+                    let dt = naive_date
+                        .and_hms_opt(0, 0, 0)
+                        .unwrap()
+                        .and_local_timezone(chrono::Utc)
+                        .unwrap();
+                    (dt, true)
+                } else {
+                    let dt = chrono::DateTime::parse_from_rfc3339(trimmed)
+                        .map(|dt| dt.with_timezone(&chrono::Utc))
+                        .unwrap_or_else(|_| chrono::Utc::now());
+                    (dt, false)
+                }
+            } else {
+                (chrono::Utc::now(), false)
+            };
+            let new_due = base_datetime + chrono::Duration::days(days);
+            let new_due_str = if is_date_only {
+                new_due.format("%Y-%m-%d").to_string()
+            } else {
+                new_due.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+            };
+            query_params.push(libsql::Value::Text(new_due_str));
+            sets.push(format!("due = ?{}", query_params.len()));
+        } else if let Some(due_val) = &input.due {
+            if due_val.trim().is_empty() {
+                query_params.push(libsql::Value::Null);
+            } else {
+                query_params.push(libsql::Value::Text(due_val.clone()));
+            }
+            sets.push(format!("due = ?{}", query_params.len()));
+        }
+
+        if let Some(lid) = &input.list_id {
+            query_params.push(libsql::Value::Text(lid.clone()));
+            sets.push(format!("list_id = ?{}", query_params.len()));
+        }
+
+        if let Some(p_opt) = input.priority {
+            match p_opt {
+                Some(p) => query_params.push(libsql::Value::Integer(p)),
+                None => query_params.push(libsql::Value::Null),
+            }
+            sets.push(format!("priority = ?{}", query_params.len()));
+        }
+
+        if sets.is_empty() {
+            updated_tasks.push(existing);
+            continue;
+        }
+
+        query_params.push(libsql::Value::Text(now.clone()));
+        sets.push(format!("updated_at = ?{}", query_params.len()));
+
+        let sql = format!(
+            "UPDATE tasks SET {} WHERE id = ?1 AND deleted_at IS NULL",
+            sets.join(", ")
+        );
+
+        conn.execute(&sql, query_params)
+            .await
+            .map_err(|e| format!("Failed to batch update task '{}': {}", id, e))?;
+
+        if let Some(updated) = fetch_task_by_id(conn, id).await? {
+            updated_tasks.push(updated);
+        }
+    }
+
+    Ok(updated_tasks)
+}
+
+#[tauri::command]
+pub async fn batch_update_tasks(
+    state: State<'_, DbState>,
+    input: BatchUpdateTasksInput,
+) -> Result<Vec<Task>, String> {
+    batch_update_tasks_impl(&state.conn, input).await
+}
+
 // ---------------------------------------------------------------------------
 // 3.3 Tag & Note Commands
 // ---------------------------------------------------------------------------
@@ -950,6 +1420,112 @@ pub async fn create_tag(
     create_tag_impl(&state.conn, name, color).await
 }
 
+pub async fn assign_tag_impl(
+    conn: &Connection,
+    task_id: String,
+    tag_id: String,
+) -> Result<(), String> {
+    let mut task_rows = conn
+        .query(
+            "SELECT id FROM tasks WHERE id = ?1 AND deleted_at IS NULL",
+            params![task_id.clone()],
+        )
+        .await
+        .map_err(|e| format!("Failed to verify task: {}", e))?;
+
+    if task_rows
+        .next()
+        .await
+        .map_err(|e| format!("Failed to fetch task row: {}", e))?
+        .is_none()
+    {
+        return Err(format!("Task with ID '{}' does not exist", task_id));
+    }
+
+    let mut tag_rows = conn
+        .query(
+            "SELECT id FROM tags WHERE (id = ?1 OR name = ?1) AND deleted_at IS NULL",
+            params![tag_id.clone()],
+        )
+        .await
+        .map_err(|e| format!("Failed to verify tag: {}", e))?;
+
+    let resolved_tag_id = if let Some(row) = tag_rows
+        .next()
+        .await
+        .map_err(|e| format!("Failed to fetch tag row: {}", e))?
+    {
+        row.get::<String>(0).map_err(|e| format!("Failed to read tag ID: {}", e))?
+    } else {
+        return Err(format!("Tag '{}' does not exist", tag_id));
+    };
+
+    let now = now_iso();
+    conn.execute(
+        "INSERT INTO task_tags (task_id, tag_id, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?3)
+         ON CONFLICT(task_id, tag_id) DO UPDATE SET deleted_at = NULL, updated_at = ?3",
+        params![task_id, resolved_tag_id, now],
+    )
+    .await
+    .map_err(|e| format!("Failed to assign tag: {}", e))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn assign_tag(
+    state: State<'_, DbState>,
+    task_id: String,
+    tag_id: String,
+) -> Result<(), String> {
+    assign_tag_impl(&state.conn, task_id, tag_id).await
+}
+
+pub async fn remove_tag_impl(
+    conn: &Connection,
+    task_id: String,
+    tag_id: String,
+) -> Result<(), String> {
+    let mut tag_rows = conn
+        .query(
+            "SELECT id FROM tags WHERE id = ?1 OR name = ?1",
+            params![tag_id.clone()],
+        )
+        .await
+        .map_err(|e| format!("Failed to verify tag: {}", e))?;
+
+    let resolved_tag_id = if let Some(row) = tag_rows
+        .next()
+        .await
+        .map_err(|e| format!("Failed to fetch tag row: {}", e))?
+    {
+        row.get::<String>(0).map_err(|e| format!("Failed to read tag ID: {}", e))?
+    } else {
+        tag_id
+    };
+
+    let now = now_iso();
+    conn.execute(
+        "UPDATE task_tags SET deleted_at = ?3, updated_at = ?3
+         WHERE task_id = ?1 AND tag_id = ?2 AND deleted_at IS NULL",
+        params![task_id, resolved_tag_id, now],
+    )
+    .await
+    .map_err(|e| format!("Failed to remove tag: {}", e))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn remove_tag(
+    state: State<'_, DbState>,
+    task_id: String,
+    tag_id: String,
+) -> Result<(), String> {
+    remove_tag_impl(&state.conn, task_id, tag_id).await
+}
+
 pub async fn get_notes_impl(conn: &Connection, task_id: String) -> Result<Vec<Note>, String> {
     let mut rows = conn
         .query(
@@ -1038,6 +1614,112 @@ pub async fn add_note(
     title: Option<String>,
 ) -> Result<Note, String> {
     add_note_impl(&state.conn, task_id, content, title).await
+}
+
+pub async fn update_note_impl(
+    conn: &Connection,
+    id: String,
+    content: Option<String>,
+    title: Option<Option<String>>,
+) -> Result<Note, String> {
+    let mut rows = conn
+        .query(
+            "SELECT id, task_id, title, content, created_at, updated_at, deleted_at
+             FROM notes
+             WHERE id = ?1 AND deleted_at IS NULL",
+            params![id.clone()],
+        )
+        .await
+        .map_err(|e| format!("Failed to query note: {}", e))?;
+
+    let _existing = if let Some(row) = rows
+        .next()
+        .await
+        .map_err(|e| format!("Failed to read note row: {}", e))?
+    {
+        row_to_note(&row).map_err(|e| format!("Failed to parse note: {}", e))?
+    } else {
+        return Err(format!("Note with ID '{}' not found", id));
+    };
+
+    let mut sets = Vec::new();
+    let mut query_params: Vec<libsql::Value> = vec![libsql::Value::Text(id.clone())];
+
+    if let Some(new_content) = content {
+        query_params.push(libsql::Value::Text(new_content));
+        sets.push(format!("content = ?{}", query_params.len()));
+    }
+
+    if let Some(new_title) = title {
+        match new_title {
+            Some(t) => query_params.push(libsql::Value::Text(t)),
+            None => query_params.push(libsql::Value::Null),
+        }
+        sets.push(format!("title = ?{}", query_params.len()));
+    }
+
+    let now = now_iso();
+    query_params.push(libsql::Value::Text(now.clone()));
+    sets.push(format!("updated_at = ?{}", query_params.len()));
+
+    let query_str = format!(
+        "UPDATE notes SET {} WHERE id = ?1 AND deleted_at IS NULL",
+        sets.join(", ")
+    );
+
+    conn.execute(&query_str, query_params)
+        .await
+        .map_err(|e| format!("Failed to update note: {}", e))?;
+
+    let mut fetch_rows = conn
+        .query(
+            "SELECT id, task_id, title, content, created_at, updated_at, deleted_at
+             FROM notes WHERE id = ?1 AND deleted_at IS NULL",
+            params![id.clone()],
+        )
+        .await
+        .map_err(|e| format!("Failed to fetch updated note: {}", e))?;
+
+    if let Some(row) = fetch_rows
+        .next()
+        .await
+        .map_err(|e| format!("Failed to read note row: {}", e))?
+    {
+        row_to_note(&row).map_err(|e| format!("Failed to parse note: {}", e))
+    } else {
+        Err(format!("Note with ID '{}' not found after update", id))
+    }
+}
+
+#[tauri::command]
+pub async fn update_note(
+    state: State<'_, DbState>,
+    id: String,
+    content: Option<String>,
+    title: Option<Option<String>>,
+) -> Result<Note, String> {
+    update_note_impl(&state.conn, id, content, title).await
+}
+
+pub async fn delete_note_impl(conn: &Connection, id: String) -> Result<(), String> {
+    let now = now_iso();
+    let rows_affected = conn
+        .execute(
+            "UPDATE notes SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1 AND deleted_at IS NULL",
+            params![id.clone(), now],
+        )
+        .await
+        .map_err(|e| format!("Failed to delete note: {}", e))?;
+
+    if rows_affected == 0 {
+        return Err(format!("Note with ID '{}' not found or already deleted", id));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_note(state: State<'_, DbState>, id: String) -> Result<(), String> {
+    delete_note_impl(&state.conn, id).await
 }
 
 // ---------------------------------------------------------------------------
@@ -1471,7 +2153,31 @@ pub async fn import_backup_impl(
         }
     }
 
-    // 3. Tasks
+    // Ensure default inbox exists and collect all known list ids
+    let default_inbox_id = crate::db::ensure_default_inbox(conn)
+        .await
+        .map_err(|e| format!("Failed to ensure default inbox: {}", e))?;
+
+    let mut list_rows = conn
+        .query("SELECT id FROM lists", ())
+        .await
+        .map_err(|e| format!("Failed to query lists: {}", e))?;
+    let mut known_list_ids = std::collections::HashSet::new();
+    while let Some(row) = list_rows
+        .next()
+        .await
+        .map_err(|e| format!("Error querying list: {}", e))?
+    {
+        let lid: String = row
+            .get(0)
+            .map_err(|e| format!("Error getting list id: {}", e))?;
+        known_list_ids.insert(lid);
+    }
+    known_list_ids.insert(default_inbox_id.clone());
+
+    let mut pending_parent_updates: Vec<(String, String)> = Vec::new();
+
+    // 3. Tasks (Pass 1: Insert/Update tasks and subtasks without foreign key parent_id constraints)
     for task in doc.tasks {
         let task_id = task.id.clone();
         let completed = status_to_completed(&task.status);
@@ -1492,6 +2198,39 @@ pub async fn import_backup_impl(
         let extra_str = task.extra.as_ref().map(|v| v.to_string());
         let created_at = task.created_at.clone().unwrap_or_else(|| now.clone());
         let updated_at = task.updated_at.clone().unwrap_or_else(|| now.clone());
+
+        // Ensure effective list_id exists in lists table to avoid foreign key failure
+        let effective_list_id = if task.list_id.trim().is_empty()
+            || task.list_id == "undefined"
+            || task.list_id == "null"
+        {
+            default_inbox_id.clone()
+        } else if !known_list_ids.contains(&task.list_id) {
+            let new_list_name = format!("Imported List");
+            conn.execute(
+                "INSERT INTO lists (id, name, color, position, is_archived, created_at, updated_at)
+                 VALUES (?1, ?2, NULL, 0, 0, ?3, ?3)",
+                params![task.list_id.clone(), new_list_name, now.clone()],
+            )
+            .await
+            .map_err(|e| format!("Failed to create missing list: {}", e))?;
+            known_list_ids.insert(task.list_id.clone());
+            lists_imported += 1;
+            task.list_id.clone()
+        } else {
+            task.list_id.clone()
+        };
+
+        if let Some(pid) = &task.parent_id {
+            let pid_trimmed = pid.trim();
+            if !pid_trimmed.is_empty()
+                && pid_trimmed != task_id
+                && pid_trimmed != "null"
+                && pid_trimmed != "undefined"
+            {
+                pending_parent_updates.push((task_id.clone(), pid_trimmed.to_string()));
+            }
+        }
 
         let mut existing = conn
             .query("SELECT id FROM tasks WHERE id = ?1", params![task_id.clone()])
@@ -1516,8 +2255,8 @@ pub async fn import_backup_impl(
                 params![
                     task_id.clone(),
                     task.uid,
-                    task.parent_id,
-                    task.list_id.clone(),
+                    None::<String>,
+                    effective_list_id.clone(),
                     task.title,
                     task.description,
                     task.due,
@@ -1551,8 +2290,8 @@ pub async fn import_backup_impl(
                 params![
                     task_id.clone(),
                     task.uid,
-                    task.parent_id,
-                    task.list_id.clone(),
+                    None::<String>,
+                    effective_list_id.clone(),
                     task.title,
                     task.description,
                     task.due,
@@ -1747,9 +2486,9 @@ pub async fn import_backup_impl(
                 {
                     conn.execute(
                         "UPDATE tasks SET title = ?2, completed = ?3, completed_at = ?4, status = ?5, position = ?6, updated_at = ?7, deleted_at = NULL WHERE id = ?1",
-                        params![
-                            item.id,
-                            item.title,
+                    params![
+                        item.id.clone(),
+                        item.title,
                             sub_comp,
                             sub_comp_at,
                             sub_status,
@@ -1764,9 +2503,9 @@ pub async fn import_backup_impl(
                         "INSERT INTO tasks (id, parent_id, list_id, title, completed, completed_at, status, position, created_at, updated_at)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
                         params![
-                            item.id,
-                            task_id.clone(),
-                            task.list_id.clone(),
+                            item.id.clone(),
+                            None::<String>,
+                            effective_list_id.clone(),
                             item.title,
                             sub_comp,
                             sub_comp_at,
@@ -1778,8 +2517,30 @@ pub async fn import_backup_impl(
                     .await
                     .map_err(|e| format!("Failed to insert checklist subtask: {}", e))?;
                 }
+                pending_parent_updates.push((item.id.clone(), task_id.clone()));
                 tasks_imported += 1;
             }
+        }
+    }
+
+    // 4. Pass 2: Safely link parent-child task relationships
+    for (child_id, parent_id) in pending_parent_updates {
+        let mut p_check = conn
+            .query("SELECT 1 FROM tasks WHERE id = ?1", params![parent_id.clone()])
+            .await
+            .map_err(|e| format!("Failed to check parent task: {}", e))?;
+        if p_check
+            .next()
+            .await
+            .map_err(|e| format!("Error checking parent task: {}", e))?
+            .is_some()
+        {
+            conn.execute(
+                "UPDATE tasks SET parent_id = ?1 WHERE id = ?2",
+                params![parent_id, child_id],
+            )
+            .await
+            .map_err(|e| format!("Failed to link parent task: {}", e))?;
         }
     }
 
@@ -1830,37 +2591,48 @@ mod tests {
         tauri::async_runtime::block_on(async {
             let (conn, temp_dir) = setup_test_conn().await;
 
-            // Create lists
-            let list1 = create_list_impl(&conn, "Inbox".to_string(), Some("#ff0000".to_string()))
+            // Verify default Inbox list exists
+            let initial_lists = get_lists_impl(&conn).await.expect("get initial lists");
+            assert_eq!(initial_lists.len(), 1);
+            assert_eq!(initial_lists[0].name, "Inbox");
+            let inbox_id = initial_lists[0].id.clone();
+
+            // Attempting to delete the default Inbox list must fail
+            let delete_inbox_res = delete_list_impl(&conn, inbox_id.clone()).await;
+            assert!(delete_inbox_res.is_err(), "Deleting Inbox list must fail");
+
+            // Create custom lists
+            let list1 = create_list_impl(&conn, "Work".to_string(), Some("#ff0000".to_string()))
                 .await
                 .expect("create list 1");
-            assert_eq!(list1.name, "Inbox");
+            assert_eq!(list1.name, "Work");
             assert_eq!(list1.color, Some("#ff0000".to_string()));
-            assert_eq!(list1.position, 0);
+            assert_eq!(list1.position, 1);
             assert!(!list1.is_archived);
 
-            let list2 = create_list_impl(&conn, "Work".to_string(), None)
+            let list2 = create_list_impl(&conn, "Personal".to_string(), None)
                 .await
                 .expect("create list 2");
-            assert_eq!(list2.name, "Work");
-            assert_eq!(list2.position, 1);
+            assert_eq!(list2.name, "Personal");
+            assert_eq!(list2.position, 2);
             assert!(!list2.is_archived);
 
-            // Get lists
+            // Get lists -> should be 3 (Inbox + Work + Personal)
             let lists = get_lists_impl(&conn).await.expect("get lists");
-            assert_eq!(lists.len(), 2);
-            assert_eq!(lists[0].id, list1.id);
-            assert_eq!(lists[1].id, list2.id);
+            assert_eq!(lists.len(), 3);
+            assert_eq!(lists[0].id, inbox_id);
+            assert_eq!(lists[1].id, list1.id);
+            assert_eq!(lists[2].id, list2.id);
 
-            // Delete list (soft delete)
+            // Delete custom list (soft delete)
             delete_list_impl(&conn, list1.id.clone())
                 .await
                 .expect("delete list");
 
             let remaining = get_lists_impl(&conn).await.expect("get lists after delete");
-            assert_eq!(remaining.len(), 1);
-            assert_eq!(remaining[0].id, list2.id);
-
+            assert_eq!(remaining.len(), 2);
+            assert_eq!(remaining[0].id, inbox_id);
+            assert_eq!(remaining[1].id, list2.id);
             // Direct check in DB that list1 has deleted_at set
             let mut rows = conn
                 .query(
@@ -1916,7 +2688,7 @@ mod tests {
             assert_eq!(subtask.parent_id, Some(parent.id.clone()));
 
             // Get tasks excluding completed
-            let active_tasks = get_tasks_impl(&conn, list.id.clone(), None)
+            let active_tasks = get_tasks_impl(&conn, Some(list.id.clone()), None, None, None, None, None, None)
                 .await
                 .expect("get active tasks");
             assert_eq!(active_tasks.len(), 2);
@@ -1930,14 +2702,14 @@ mod tests {
             assert!(toggled.completed_at.is_some());
 
             // Get tasks without completed -> only parent returned
-            let incomplete = get_tasks_impl(&conn, list.id.clone(), Some(false))
+            let incomplete = get_tasks_impl(&conn, Some(list.id.clone()), Some(false), None, None, None, None, None)
                 .await
                 .expect("get incomplete tasks");
             assert_eq!(incomplete.len(), 1);
             assert_eq!(incomplete[0].id, parent.id);
 
             // Get tasks including completed -> both returned
-            let all = get_tasks_impl(&conn, list.id.clone(), Some(true))
+            let all = get_tasks_impl(&conn, Some(list.id.clone()), Some(true), None, None, None, None, None)
                 .await
                 .expect("get all tasks");
             assert_eq!(all.len(), 2);
@@ -1994,7 +2766,7 @@ mod tests {
                 .await
                 .expect("delete parent task");
 
-            let after_delete = get_tasks_impl(&conn, list.id.clone(), Some(true))
+            let after_delete = get_tasks_impl(&conn, Some(list.id.clone()), Some(true), None, None, None, None, None)
                 .await
                 .expect("get tasks after delete");
             assert_eq!(after_delete.len(), 0);
@@ -2229,8 +3001,9 @@ mod tests {
             let exported = export_backup_impl(&conn).await.expect("export backup");
             assert_eq!(exported.version, "1.0");
             assert_eq!(exported.source, Some("tudu".to_string()));
-            assert_eq!(exported.lists.len(), 1);
-            assert_eq!(exported.lists[0].name, "Sprint Tasks");
+            assert_eq!(exported.lists.len(), 2);
+            assert!(exported.lists.iter().any(|l| l.name == "Inbox"));
+            assert!(exported.lists.iter().any(|l| l.name == "Sprint Tasks"));
             assert_eq!(exported.tasks.len(), 1);
 
             let exp_task = &exported.tasks[0];
@@ -2397,13 +3170,13 @@ mod tests {
                 let lists = get_lists_impl(conn2)
                     .await
                     .expect("get lists after restart");
-                assert_eq!(lists.len(), 1);
-                assert_eq!(lists[0].id, list_id);
-                assert_eq!(lists[0].name, "Project Launch");
-                assert_eq!(lists[0].color, Some("#10b981".to_string()));
-
+                assert_eq!(lists.len(), 2);
+                assert!(lists.iter().any(|l| l.name == "Inbox"));
+                let proj_list = lists.iter().find(|l| l.id == list_id).expect("Project Launch list");
+                assert_eq!(proj_list.name, "Project Launch");
+                assert_eq!(proj_list.color, Some("#10b981".to_string()));
                 // Verify tasks were persisted
-                let all_tasks = get_tasks_impl(conn2, list_id.clone(), Some(true))
+                let all_tasks = get_tasks_impl(conn2, Some(list_id.clone()), Some(true), None, None, None, None, None)
                     .await
                     .expect("get all tasks after restart");
                 assert_eq!(all_tasks.len(), 2);
@@ -2431,12 +3204,459 @@ mod tests {
                 assert!(persisted_task2.completed_at.is_none());
 
                 // Incomplete tasks query should only return task 2
-                let incomplete_tasks = get_tasks_impl(conn2, list_id.clone(), Some(false))
+                let incomplete_tasks = get_tasks_impl(conn2, Some(list_id.clone()), Some(false), None, None, None, None, None)
                     .await
                     .expect("get incomplete tasks after restart");
                 assert_eq!(incomplete_tasks.len(), 1);
                 assert_eq!(incomplete_tasks[0].id, task2_id);
             }
+
+            let _ = std::fs::remove_dir_all(temp_dir);
+        });
+    }
+
+    #[test]
+    fn test_default_views() {
+        tauri::async_runtime::block_on(async {
+            let (conn, temp_dir) = setup_test_conn().await;
+
+            // Get default Inbox list
+            let lists = get_lists_impl(&conn).await.expect("get lists");
+            let inbox_id = lists[0].id.clone();
+
+            // Insert tasks with various due dates relative to today
+            // Task 1: Overdue (yesterday)
+            create_task_impl(
+                &conn,
+                inbox_id.clone(),
+                "Overdue task".to_string(),
+                Some(chrono::Local::now().checked_sub_signed(chrono::Duration::days(1)).unwrap().format("%Y-%m-%d").to_string()),
+                Some(1),
+                None,
+            )
+            .await
+            .expect("create overdue task");
+
+            // Task 2: Due today
+            create_task_impl(
+                &conn,
+                inbox_id.clone(),
+                "Today task".to_string(),
+                Some(chrono::Local::now().format("%Y-%m-%d").to_string()),
+                Some(2),
+                None,
+            )
+            .await
+            .expect("create today task");
+
+            // Task 3: Due tomorrow
+            create_task_impl(
+                &conn,
+                inbox_id.clone(),
+                "Tomorrow task".to_string(),
+                Some(chrono::Local::now().checked_add_signed(chrono::Duration::days(1)).unwrap().format("%Y-%m-%d").to_string()),
+                None,
+                None,
+            )
+            .await
+            .expect("create tomorrow task");
+
+            // Task 4: Due in 4 days (this week)
+            create_task_impl(
+                &conn,
+                inbox_id.clone(),
+                "This week task".to_string(),
+                Some(chrono::Local::now().checked_add_signed(chrono::Duration::days(4)).unwrap().format("%Y-%m-%d").to_string()),
+                None,
+                None,
+            )
+            .await
+            .expect("create this week task");
+
+            // Task 5: Due in 20 days (future)
+            create_task_impl(
+                &conn,
+                inbox_id.clone(),
+                "Future task".to_string(),
+                Some(chrono::Local::now().checked_add_signed(chrono::Duration::days(20)).unwrap().format("%Y-%m-%d").to_string()),
+                None,
+                None,
+            )
+            .await
+            .expect("create future task");
+
+            // Query "today" view -> overdue + today (2 tasks)
+            let today_tasks = get_tasks_impl(&conn, None, Some(false), Some("today".to_string()), None, None, None, None)
+                .await
+                .expect("get today tasks");
+            assert_eq!(today_tasks.len(), 2);
+            let titles: Vec<String> = today_tasks.into_iter().map(|t| t.title).collect();
+            assert!(titles.contains(&"Overdue task".to_string()));
+            assert!(titles.contains(&"Today task".to_string()));
+
+            // Query "tomorrow" view -> tomorrow task (1 task)
+            let tomorrow_tasks = get_tasks_impl(&conn, None, Some(false), Some("tomorrow".to_string()), None, None, None, None)
+                .await
+                .expect("get tomorrow tasks");
+            assert_eq!(tomorrow_tasks.len(), 1);
+            assert_eq!(tomorrow_tasks[0].title, "Tomorrow task");
+
+            // Query "this_week" view -> overdue, today, tomorrow, and in 4 days (4 tasks, excludes in 20 days)
+            let this_week_tasks = get_tasks_impl(&conn, None, Some(false), Some("this_week".to_string()), None, None, None, None)
+                .await
+                .expect("get this week tasks");
+            assert_eq!(this_week_tasks.len(), 4);
+            let week_titles: Vec<String> = this_week_tasks.into_iter().map(|t| t.title).collect();
+            assert!(week_titles.contains(&"Overdue task".to_string()));
+            assert!(week_titles.contains(&"Today task".to_string()));
+            assert!(week_titles.contains(&"Tomorrow task".to_string()));
+            assert!(week_titles.contains(&"This week task".to_string()));
+            assert!(!week_titles.contains(&"Future task".to_string()));
+
+            let _ = std::fs::remove_dir_all(temp_dir);
+        });
+    }
+
+    #[test]
+    fn test_phase2_crud_operations() {
+        tauri::async_runtime::block_on(async {
+            let (conn, temp_dir) = setup_test_conn().await;
+
+            // 1. List updates
+            let list = create_list_impl(&conn, "Old List Name".to_string(), Some("#000000".to_string()))
+                .await
+                .expect("create list");
+            let updated_list = update_list_impl(
+                &conn,
+                list.id.clone(),
+                Some("New List Name".to_string()),
+                Some(Some("#123456".to_string())),
+                Some(5),
+            )
+            .await
+            .expect("update list");
+            assert_eq!(updated_list.name, "New List Name");
+            assert_eq!(updated_list.color, Some("#123456".to_string()));
+            assert_eq!(updated_list.position, 5);
+
+            // Cannot rename Inbox
+            let lists = get_lists_impl(&conn).await.unwrap();
+            let inbox = lists.iter().find(|l| l.name.to_lowercase() == "inbox").unwrap();
+            let rename_inbox_err = update_list_impl(
+                &conn,
+                inbox.id.clone(),
+                Some("Renamed Inbox".to_string()),
+                None,
+                None,
+            )
+            .await;
+            assert!(rename_inbox_err.is_err(), "Renaming inbox must fail");
+
+            // 2. Task creation and tag assignment/removal
+            let task = create_task_impl(
+                &conn,
+                list.id.clone(),
+                "Parent Task".to_string(),
+                Some("2026-06-15T12:00:00.000Z".to_string()),
+                Some(2),
+                None,
+            )
+            .await
+            .expect("create parent task");
+
+            let tag1 = create_tag_impl(&conn, "feature".to_string(), Some("#00ff00".to_string()))
+                .await
+                .expect("create tag1");
+            let tag2 = create_tag_impl(&conn, "backend".to_string(), None)
+                .await
+                .expect("create tag2");
+
+            assign_tag_impl(&conn, task.id.clone(), tag1.id.clone())
+                .await
+                .expect("assign tag1 by id");
+            assign_tag_impl(&conn, task.id.clone(), "backend".to_string())
+                .await
+                .expect("assign tag2 by name");
+
+            // Subtask
+            let subtask = create_task_impl(
+                &conn,
+                list.id.clone(),
+                "Child Subtask".to_string(),
+                Some("2026-06-16T12:00:00.000Z".to_string()),
+                Some(3),
+                Some(task.id.clone()),
+            )
+            .await
+            .expect("create subtask");
+
+            // Notes
+            let note1 = add_note_impl(&conn, task.id.clone(), "First note".to_string(), Some("Title 1".to_string()))
+                .await
+                .expect("add note 1");
+            let updated_note = update_note_impl(
+                &conn,
+                note1.id.clone(),
+                Some("Updated note content".to_string()),
+                Some(Some("Updated Title".to_string())),
+            )
+            .await
+            .expect("update note");
+            assert_eq!(updated_note.content, "Updated note content");
+            assert_eq!(updated_note.title, Some("Updated Title".to_string()));
+
+            // 3. get_task_detail
+            let detail = get_task_detail_impl(&conn, task.id.clone())
+                .await
+                .expect("get task detail")
+                .expect("task detail exists");
+            assert_eq!(detail.task.id, task.id);
+            assert_eq!(detail.tags.len(), 2);
+            assert_eq!(detail.notes.len(), 1);
+            assert_eq!(detail.notes[0].content, "Updated note content");
+            assert_eq!(detail.subtasks.len(), 1);
+            assert_eq!(detail.subtasks[0].id, subtask.id);
+
+            // Test remove_tag
+            remove_tag_impl(&conn, task.id.clone(), tag1.id.clone())
+                .await
+                .expect("remove tag1");
+            let detail_after_tag_remove = get_task_detail_impl(&conn, task.id.clone())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(detail_after_tag_remove.tags.len(), 1);
+            assert_eq!(detail_after_tag_remove.tags[0].name, "backend");
+
+            // Test delete_note
+            delete_note_impl(&conn, note1.id.clone())
+                .await
+                .expect("delete note");
+            let notes_after_delete = get_notes_impl(&conn, task.id.clone()).await.unwrap();
+            assert_eq!(notes_after_delete.len(), 0);
+
+            // 4. Test get_tasks filters
+            // Filter by tag
+            let tasks_tagged_backend = get_tasks_impl(
+                &conn,
+                None,
+                Some(true),
+                None,
+                Some("backend".to_string()),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("filter by tag");
+            assert_eq!(tasks_tagged_backend.len(), 1);
+            assert_eq!(tasks_tagged_backend[0].id, task.id);
+
+            let tasks_tagged_feature = get_tasks_impl(
+                &conn,
+                None,
+                Some(true),
+                None,
+                Some("feature".to_string()),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("filter by removed tag");
+            assert_eq!(tasks_tagged_feature.len(), 0);
+
+            // Filter by due date range
+            let tasks_due_range = get_tasks_impl(
+                &conn,
+                None,
+                Some(true),
+                None,
+                None,
+                Some("2026-06-15".to_string()),
+                Some("2026-06-15".to_string()),
+                None,
+            )
+            .await
+            .expect("filter by due date range");
+            assert_eq!(tasks_due_range.len(), 1);
+            assert_eq!(tasks_due_range[0].id, task.id);
+
+            // Filter by parent_id (root tasks vs child tasks)
+            let root_tasks = get_tasks_impl(
+                &conn,
+                Some(list.id.clone()),
+                Some(true),
+                None,
+                None,
+                None,
+                None,
+                Some(None), // parent_id IS NULL
+            )
+            .await
+            .expect("filter root tasks");
+            assert_eq!(root_tasks.len(), 1);
+            assert_eq!(root_tasks[0].id, task.id);
+
+            let subtasks_of_parent = get_tasks_impl(
+                &conn,
+                Some(list.id.clone()),
+                Some(true),
+                None,
+                None,
+                None,
+                None,
+                Some(Some(task.id.clone())),
+            )
+            .await
+            .expect("filter subtasks");
+            assert_eq!(subtasks_of_parent.len(), 1);
+            assert_eq!(subtasks_of_parent[0].id, subtask.id);
+
+            // 5. Test batch_update_tasks
+            let batch_input = BatchUpdateTasksInput {
+                task_ids: vec![task.id.clone(), subtask.id.clone()],
+                completed: Some(true),
+                postpone_days: Some(3),
+                due: None,
+                list_id: None,
+                priority: Some(Some(1)),
+            };
+            let batch_result = batch_update_tasks_impl(&conn, batch_input)
+                .await
+                .expect("batch update tasks");
+            assert_eq!(batch_result.len(), 2);
+            for t in batch_result {
+                assert!(t.completed);
+                assert_eq!(t.status, "completed");
+                assert_eq!(t.priority, Some(1));
+                assert!(t.due.is_some());
+            }
+
+            // 6. Test JSON deserialization and batch update with priority: null (Priority None) and date-only postpone
+            let task_with_due = create_task_impl(
+                &conn,
+                list.id.clone(),
+                "Task with date-only due".to_string(),
+                Some("2026-09-10".to_string()),
+                Some(2),
+                None,
+            )
+            .await
+            .expect("create task with due");
+            assert_eq!(task_with_due.due, Some("2026-09-10".to_string()));
+            assert_eq!(task_with_due.priority, Some(2));
+
+            let json_payload = serde_json::json!({
+                "task_ids": [task_with_due.id.clone()],
+                "priority": null,
+                "postpone_days": 2
+            });
+            let parsed_input: BatchUpdateTasksInput = serde_json::from_value(json_payload)
+                .expect("deserialize json with priority null");
+            assert_eq!(parsed_input.priority, Some(None));
+
+            let res = batch_update_tasks_impl(&conn, parsed_input)
+                .await
+                .expect("batch update with priority null");
+            assert_eq!(res.len(), 1);
+            assert_eq!(res[0].priority, None, "Priority should be cleared to None");
+            assert_eq!(res[0].due, Some("2026-09-12".to_string()), "Date-only due should be postponed to 2026-09-12");
+
+            let _ = std::fs::remove_dir_all(temp_dir);
+        });
+    }
+    #[test]
+    fn test_import_backup_foreign_key_resilience() {
+        tauri::async_runtime::block_on(async {
+            let temp_dir = std::env::temp_dir().join(format!("tudu_test_fk_{}", uuid::Uuid::new_v4()));
+            let db_path = temp_dir.join("test.db");
+            let state = crate::db::init_db(&db_path).await.expect("init_db failed");
+            let conn = state.conn;
+
+            // JSON with:
+            // 1. Child task "child-1" placed BEFORE parent task "parent-1"
+            // 2. Orphaned child task "child-orphan" referencing non-existent parent "parent-ghost"
+            // 3. Task with unlisted list_id "unlisted-list-1"
+            // 4. Task with empty list_id ""
+            let test_json = r##"{
+                "version": "1.0",
+                "source": "rtm",
+                "exported_at": "2026-09-10T12:00:00Z",
+                "lists": [
+                    { "id": "list-known", "name": "Work", "position": 0, "is_archived": false }
+                ],
+                "tasks": [
+                    {
+                        "id": "child-1",
+                        "list_id": "list-known",
+                        "parent_id": "parent-1",
+                        "title": "Subtask Before Parent",
+                        "status": "needs_action"
+                    },
+                    {
+                        "id": "parent-1",
+                        "list_id": "list-known",
+                        "parent_id": null,
+                        "title": "Parent Task After Subtask",
+                        "status": "needs_action"
+                    },
+                    {
+                        "id": "child-orphan",
+                        "list_id": "list-known",
+                        "parent_id": "parent-ghost",
+                        "title": "Orphan Subtask",
+                        "status": "needs_action"
+                    },
+                    {
+                        "id": "task-unlisted-list",
+                        "list_id": "unlisted-list-1",
+                        "parent_id": null,
+                        "title": "Task in Unlisted List",
+                        "status": "needs_action"
+                    },
+                    {
+                        "id": "task-empty-list",
+                        "list_id": "",
+                        "parent_id": null,
+                        "title": "Task in Empty List",
+                        "status": "needs_action"
+                    }
+                ]
+            }"##;
+
+            let result = import_backup_json_impl(&conn, test_json)
+                .await
+                .expect("import backup json must succeed without foreign key failure");
+            assert_eq!(result.tasks_imported, 5);
+
+            // Verify child-1 is linked to parent-1
+            let child1 = fetch_task_by_id(&conn, "child-1")
+                .await
+                .expect("fetch child1")
+                .expect("child1 found");
+            assert_eq!(child1.parent_id, Some("parent-1".to_string()));
+
+            // Verify orphan child has parent_id = None
+            let orphan = fetch_task_by_id(&conn, "child-orphan")
+                .await
+                .expect("fetch orphan")
+                .expect("orphan found");
+            assert_eq!(orphan.parent_id, None);
+
+            // Verify unlisted list task was imported
+            let unlisted_task = fetch_task_by_id(&conn, "task-unlisted-list")
+                .await
+                .expect("fetch unlisted_task")
+                .expect("unlisted_task found");
+            assert_eq!(unlisted_task.list_id, "unlisted-list-1");
+
+            // Verify empty list task defaulted to default inbox
+            let empty_list_task = fetch_task_by_id(&conn, "task-empty-list")
+                .await
+                .expect("fetch empty_list_task")
+                .expect("empty_list_task found");
+            assert_eq!(empty_list_task.list_id, "00000000-0000-0000-0000-000000000001");
 
             let _ = std::fs::remove_dir_all(temp_dir);
         });

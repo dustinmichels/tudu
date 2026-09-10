@@ -13,8 +13,12 @@
 		"windows": [
 			{
 				"title": "TuDu",
-				"width": 800,
-				"height": 600
+				"width": 1280,
+				"height": 800,
+				"minWidth": 800,
+				"minHeight": 600,
+				"maximized": true,
+				"dragDropEnabled": false
 			}
 		],
 		"security": {

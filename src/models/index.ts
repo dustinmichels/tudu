@@ -62,6 +62,12 @@ export interface Task {
 	deleted_at: string | null;
 }
 
+export interface TaskDetail extends Task {
+	tags: Tag[];
+	notes: Note[];
+	subtasks: Task[];
+}
+
 export interface Tag {
 	id: string;
 	name: string;
@@ -87,6 +93,13 @@ export interface CreateListInput {
 	position?: number;
 	is_archived?: boolean;
 	extra?: Record<string, unknown> | null;
+}
+
+export interface UpdateListInput {
+	id: string;
+	name?: string;
+	color?: string | null;
+	position?: number;
 }
 
 export interface CreateTaskInput {
@@ -149,6 +162,31 @@ export interface AddNoteInput {
 	task_id: string;
 	content: string;
 	title?: string | null;
+}
+
+export interface UpdateNoteInput {
+	id: string;
+	content?: string;
+	title?: string | null;
+}
+
+export interface BatchUpdateTasksInput {
+	task_ids: string[];
+	completed?: boolean;
+	postpone_days?: number;
+	due?: string | null;
+	list_id?: string;
+	priority?: Priority | null;
+}
+
+export interface GetTasksOptions {
+	listId?: string | null;
+	includeCompleted?: boolean;
+	view?: string | null;
+	tag?: string | null;
+	dueFrom?: string | null;
+	dueTo?: string | null;
+	parentId?: string | null;
 }
 
 export interface Reminder {

@@ -1,43 +1,674 @@
 <script setup lang="ts">
 import {
+	AlertCircle,
 	Calendar,
+	CalendarPlus,
+	CalendarRange,
+	Check,
 	CheckCircle2,
 	CheckSquare,
+	ChevronDown,
 	Circle,
 	CornerDownLeft,
+	FolderInput,
+	Inbox,
 	ListFilter,
+	ListTree,
+	Menu,
+	MinusSquare,
+	PanelRight,
+	PanelRightClose,
+	Square,
+	Sunrise,
+	Tag as TagIcon,
+	Tags,
 	Trash2,
 } from "lucide-vue-next";
-import { computed, ref } from "vue";
-import { PRIORITY } from "../models/index.ts";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { PRIORITY, type Priority, type Tag } from "../models/index.ts";
+import { assignTag, getTaskDetail, removeTag } from "../services/api.ts";
+import { useFilterStore } from "../stores/filters.ts";
 import { useListStore } from "../stores/lists.ts";
+import { useTagStore } from "../stores/tags.ts";
 import { useTaskStore } from "../stores/tasks.ts";
+import { useUIStore } from "../stores/ui.ts";
 
 const listStore = useListStore();
 const taskStore = useTaskStore();
+const filterStore = useFilterStore();
+const tagStore = useTagStore();
+const uiStore = useUIStore();
 
 const newTaskTitle = ref("");
+const quickAddInputRef = ref<HTMLInputElement | null>(null);
 const isAdding = ref(false);
 
 const activeList = computed(() => listStore.activeList);
+const isView = computed(() => listStore.activeView !== null);
+const hasActiveSelection = computed(
+	() =>
+		!!listStore.activeList ||
+		!!listStore.activeView ||
+		!!filterStore.selectedTag,
+);
+
+const viewTitle = computed(() => {
+	if (filterStore.selectedTag) return `#${filterStore.selectedTag}`;
+	if (listStore.activeView === "inbox") return "Inbox";
+	if (listStore.activeView === "all") return "All Tasks";
+	if (listStore.activeView === "today") return "Today";
+	if (listStore.activeView === "tomorrow") return "Tomorrow";
+	if (listStore.activeView === "this_week") return "This Week";
+	if (listStore.activeView === "trash") return "Trash";
+	return null;
+});
+
+const headerTitle = computed(() => {
+	if (viewTitle.value) return viewTitle.value;
+	return activeList.value ? activeList.value.name : "No Selection";
+});
+
+const quickAddPlaceholder = computed(() => {
+	if (filterStore.selectedTag)
+		return `Add a task tagged #${filterStore.selectedTag}...`;
+	if (viewTitle.value) return `Add a task to ${viewTitle.value}...`;
+	return activeList.value
+		? `Add a task to ${activeList.value.name}...`
+		: "Add a task...";
+});
 
 const visibleTasks = computed(() => {
-	if (taskStore.includeCompleted) {
-		return taskStore.tasks;
-	}
-	return taskStore.incompleteTasks;
+	// If user is searching, use filteredTasks which handles search across title, description, location, url
+	const tasks = filterStore.searchQuery.trim()
+		? taskStore.filteredTasks
+		: taskStore.includeCompleted
+			? taskStore.tasks
+			: taskStore.incompleteTasks;
+
+	// Subtasks belong in parent detail panes, not top-level center-pane list rows
+	return tasks.filter((t) => !t.parent_id);
 });
+
+// ---------------------------------------------------------------------------
+// Selection & Batch Actions State
+// ---------------------------------------------------------------------------
+const selectedTaskIds = ref<Set<string>>(new Set());
+const isBatchOperating = ref(false);
+
+type DropdownMenu = "select" | "postpone" | "priority" | "list" | "tag" | null;
+const activeDropdown = ref<DropdownMenu>(null);
+const customPostponeDate = ref("");
+
+// Tag cache for visible tasks: taskId -> Tag[]
+const taskTagsCache = ref<Map<string, Tag[]>>(new Map());
+const customNewTagName = ref("");
+
+interface ContextMenuState {
+	visible: boolean;
+	x: number;
+	y: number;
+	taskId: string | null;
+}
+
+const contextMenu = ref<ContextMenuState>({
+	visible: false,
+	x: 0,
+	y: 0,
+	taskId: null,
+});
+
+function closeContextMenu() {
+	contextMenu.value.visible = false;
+	contextMenu.value.taskId = null;
+}
+
+function handleTaskContextMenu(e: MouseEvent, taskId: string) {
+	e.preventDefault();
+	e.stopPropagation();
+	closeDropdowns();
+	taskStore.setActiveTask(taskId);
+	contextMenu.value = {
+		visible: true,
+		x: Math.min(e.clientX, window.innerWidth - 200),
+		y: Math.min(e.clientY, window.innerHeight - 240),
+		taskId,
+	};
+}
+
+async function handleContextMenuPostpone(days: number) {
+	const id = contextMenu.value.taskId;
+	closeContextMenu();
+	if (!id) return;
+	try {
+		await taskStore.postponeTask(id, days);
+	} catch (err) {
+		console.error("Failed to postpone task from context menu:", err);
+	}
+}
+
+function toggleDropdown(menu: DropdownMenu) {
+	activeDropdown.value = activeDropdown.value === menu ? null : menu;
+}
+
+function closeDropdowns() {
+	activeDropdown.value = null;
+}
+
+function handleDocumentClick(e: MouseEvent) {
+	closeContextMenu();
+	const target = e.target as HTMLElement | null;
+	if (target && !target.closest("[data-dropdown-container]")) {
+		closeDropdowns();
+	}
+}
+
+function handleGlobalKeyDown(e: KeyboardEvent) {
+	if (e.defaultPrevented) return;
+	const target = e.target as HTMLElement | null;
+	const isEditingInput =
+		target &&
+		(target.tagName === "INPUT" ||
+			target.tagName === "TEXTAREA" ||
+			target.tagName === "SELECT" ||
+			target.isContentEditable);
+
+	// Shortcuts when NOT typing in an input
+	if (!isEditingInput) {
+		// '/' -> focus global search bar
+		if (e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+			e.preventDefault();
+			const searchInput = document.querySelector<HTMLInputElement>(
+				"input[data-global-search]",
+			);
+
+			searchInput?.focus();
+			searchInput?.select();
+			return;
+		}
+
+		// 't' -> focus task quick-add
+		if (e.key === "t" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+			e.preventDefault();
+			quickAddInputRef.value?.focus();
+			quickAddInputRef.value?.select();
+			return;
+		}
+
+		// Navigation: Ctrl+Tab / Ctrl+Shift+Tab or j / k or ArrowDown / ArrowUp
+		const isNextShortcut =
+			(e.ctrlKey &&
+				!e.shiftKey &&
+				!e.metaKey &&
+				!e.altKey &&
+				e.key === "Tab") ||
+			((e.key === "j" || e.key === "ArrowDown") &&
+				!e.ctrlKey &&
+				!e.metaKey &&
+				!e.altKey);
+		const isPrevShortcut =
+			(e.ctrlKey && e.shiftKey && !e.metaKey && !e.altKey && e.key === "Tab") ||
+			((e.key === "k" || e.key === "ArrowUp") &&
+				!e.ctrlKey &&
+				!e.metaKey &&
+				!e.altKey);
+
+		if (isNextShortcut || isPrevShortcut) {
+			const tasks = visibleTasks.value;
+			if (!tasks.length) return;
+			e.preventDefault();
+			const currentId = taskStore.activeTaskId;
+			const currentIndex = currentId
+				? tasks.findIndex((t) => t.id === currentId)
+				: -1;
+
+			let nextIndex: number;
+			if (isNextShortcut) {
+				nextIndex =
+					currentIndex === -1
+						? 0
+						: Math.min(currentIndex + 1, tasks.length - 1);
+			} else {
+				nextIndex =
+					currentIndex === -1
+						? tasks.length - 1
+						: Math.max(currentIndex - 1, 0);
+			}
+
+			const nextTask = tasks[nextIndex];
+			if (nextTask) {
+				taskStore.setActiveTask(nextTask.id);
+				uiStore.toggleDetail(true);
+				// Scroll into view if needed
+				const el = document.querySelector(`[data-task-id="${nextTask.id}"]`);
+				el?.scrollIntoView({ block: "nearest" });
+			}
+			return;
+		}
+
+		// 'Enter' or 'c' -> complete selected task
+		if (
+			(e.key === "Enter" &&
+				!e.ctrlKey &&
+				!e.metaKey &&
+				!e.altKey &&
+				!e.shiftKey) ||
+			(e.key === "c" && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey)
+		) {
+			const currentId = taskStore.activeTaskId;
+			if (!currentId) return;
+			e.preventDefault();
+			void taskStore.toggleTask(currentId).catch((err) => {
+				console.error("Failed to toggle task via shortcut:", err);
+			});
+			return;
+		}
+
+		// 'p' -> postpone selected task by 1 day
+		if (e.key === "p" && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
+			const currentId = taskStore.activeTaskId;
+			if (!currentId) return;
+			e.preventDefault();
+			void taskStore.postponeTask(currentId, 1).catch((err) => {
+				console.error("Failed to postpone task via shortcut:", err);
+			});
+			return;
+		}
+
+		// '1', '2', '3' -> priority 1-3, '4' -> priority None
+		if (
+			(e.key === "1" || e.key === "2" || e.key === "3" || e.key === "4") &&
+			!e.repeat &&
+			!e.ctrlKey &&
+			!e.metaKey &&
+			!e.altKey
+		) {
+			const currentId = taskStore.activeTaskId;
+			if (!currentId) return;
+			e.preventDefault();
+			const priorityMap: Record<string, Priority | null> = {
+				"1": PRIORITY.HIGH as Priority,
+				"2": PRIORITY.MEDIUM as Priority,
+				"3": PRIORITY.LOW as Priority,
+				"4": null,
+			};
+			void taskStore
+				.updateTask({
+					id: currentId,
+					priority: priorityMap[e.key] ?? null,
+				})
+				.catch((err) => {
+					console.error("Failed to update priority via shortcut:", err);
+				});
+			return;
+		}
+
+		// '?' -> open keyboard shortcuts modal
+		if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+			e.preventDefault();
+			uiStore.toggleShortcuts(true);
+			return;
+		}
+	}
+}
+
+onMounted(() => {
+	document.addEventListener("click", handleDocumentClick);
+	window.addEventListener("keydown", handleGlobalKeyDown);
+	loadVisibleTaskTags();
+});
+
+onUnmounted(() => {
+	document.removeEventListener("click", handleDocumentClick);
+	window.removeEventListener("keydown", handleGlobalKeyDown);
+});
+
+// Clear selections when active view or list changes
+watch(
+	() => [listStore.activeListId, listStore.activeView, filterStore.selectedTag],
+	() => {
+		selectedTaskIds.value.clear();
+		closeDropdowns();
+	},
+);
+
+// Keep tag cache populated for visible tasks
+async function loadVisibleTaskTags() {
+	const tasks = visibleTasks.value;
+	const missingIds = tasks
+		.map((t) => t.id)
+		.filter((id) => !taskTagsCache.value.has(id));
+
+	if (!missingIds.length) return;
+
+	await Promise.all(
+		missingIds.map(async (id) => {
+			try {
+				const detail = await getTaskDetail(id);
+				if (detail?.tags) {
+					taskTagsCache.value.set(id, detail.tags);
+				} else {
+					taskTagsCache.value.set(id, []);
+				}
+			} catch {
+				taskTagsCache.value.set(id, []);
+			}
+		}),
+	);
+}
+
+watch(
+	visibleTasks,
+	() => {
+		loadVisibleTaskTags();
+	},
+	{ immediate: true },
+);
+
+const subtaskCounts = computed(() => {
+	const counts = new Map<string, { total: number; incomplete: number }>();
+	for (const task of taskStore.allTasks) {
+		if (task.parent_id && task.deleted_at === null) {
+			const current = counts.get(task.parent_id) ?? {
+				total: 0,
+				incomplete: 0,
+			};
+			current.total += 1;
+			if (!task.completed) {
+				current.incomplete += 1;
+			}
+			counts.set(task.parent_id, current);
+		}
+	}
+	return counts;
+});
+
+function getSubtaskCount(taskId: string) {
+	return subtaskCounts.value.get(taskId) ?? null;
+}
+
+function getTaskTags(taskId: string): Tag[] {
+	return taskTagsCache.value.get(taskId) ?? [];
+}
+
+const allVisibleSelected = computed(() => {
+	if (!visibleTasks.value.length) return false;
+	return visibleTasks.value.every((t) => selectedTaskIds.value.has(t.id));
+});
+
+const someVisibleSelected = computed(() => {
+	return (
+		visibleTasks.value.some((t) => selectedTaskIds.value.has(t.id)) &&
+		!allVisibleSelected.value
+	);
+});
+
+function handleToggleSelectTask(event: MouseEvent, taskId: string) {
+	event.stopPropagation();
+	const next = new Set(selectedTaskIds.value);
+	if (next.has(taskId)) {
+		next.delete(taskId);
+	} else {
+		next.add(taskId);
+	}
+	selectedTaskIds.value = next;
+}
+
+function selectAll() {
+	selectedTaskIds.value = new Set(visibleTasks.value.map((t) => t.id));
+	closeDropdowns();
+}
+
+function selectNone() {
+	selectedTaskIds.value.clear();
+	closeDropdowns();
+}
+
+function selectInvert() {
+	const next = new Set<string>();
+	for (const task of visibleTasks.value) {
+		if (!selectedTaskIds.value.has(task.id)) {
+			next.add(task.id);
+		}
+	}
+	selectedTaskIds.value = next;
+	closeDropdowns();
+}
+
+async function handleBatchComplete() {
+	const ids = Array.from(selectedTaskIds.value);
+	if (!ids.length) return;
+	isBatchOperating.value = true;
+	try {
+		await taskStore.batchUpdate({
+			task_ids: ids,
+			completed: true,
+		});
+		selectedTaskIds.value.clear();
+	} catch (err) {
+		console.error("Failed to batch complete tasks:", err);
+	} finally {
+		isBatchOperating.value = false;
+		closeDropdowns();
+	}
+}
+
+async function handleBatchPostpone(days: number) {
+	const ids = Array.from(selectedTaskIds.value);
+	if (!ids.length) return;
+	isBatchOperating.value = true;
+	try {
+		await taskStore.batchUpdate({
+			task_ids: ids,
+			postpone_days: days,
+		});
+	} catch (err) {
+		console.error("Failed to batch postpone tasks:", err);
+	} finally {
+		isBatchOperating.value = false;
+		closeDropdowns();
+	}
+}
+
+async function handleBatchCustomDate() {
+	const ids = Array.from(selectedTaskIds.value);
+	const dateVal = customPostponeDate.value.trim();
+	if (!ids.length || !dateVal) return;
+	isBatchOperating.value = true;
+	try {
+		await taskStore.batchUpdate({
+			task_ids: ids,
+			due: dateVal,
+		});
+		customPostponeDate.value = "";
+	} catch (err) {
+		console.error("Failed to set custom date for tasks:", err);
+	} finally {
+		isBatchOperating.value = false;
+		closeDropdowns();
+	}
+}
+
+async function handleBatchSetPriority(priority: Priority | null) {
+	const ids = Array.from(selectedTaskIds.value);
+	if (!ids.length) return;
+	isBatchOperating.value = true;
+	try {
+		await taskStore.batchUpdate({
+			task_ids: ids,
+			priority,
+		});
+	} catch (err) {
+		console.error("Failed to batch set priority:", err);
+	} finally {
+		isBatchOperating.value = false;
+		closeDropdowns();
+	}
+}
+
+async function handleBatchMoveToList(listId: string) {
+	const ids = Array.from(selectedTaskIds.value);
+	if (!ids.length) return;
+	isBatchOperating.value = true;
+	try {
+		await taskStore.batchUpdate({
+			task_ids: ids,
+			list_id: listId,
+		});
+		selectedTaskIds.value.clear();
+	} catch (err) {
+		console.error("Failed to batch move tasks to list:", err);
+	} finally {
+		isBatchOperating.value = false;
+		closeDropdowns();
+	}
+}
+
+async function handleBatchAssignTag(tagName: string) {
+	const trimmed = tagName.trim();
+	const ids = Array.from(selectedTaskIds.value);
+	if (!ids.length || !trimmed) return;
+	isBatchOperating.value = true;
+	try {
+		// Ensure tag exists in db before assigning (assignTag requires tag to exist)
+		const existingTag = tagStore.tags.find(
+			(t) => t.name.toLowerCase() === trimmed.toLowerCase(),
+		);
+		const tag = existingTag ?? (await tagStore.createTag(trimmed));
+		await Promise.all(ids.map((id) => assignTag(id, tag.id)));
+		await Promise.all(
+			ids.map(async (id) => {
+				try {
+					const detail = await getTaskDetail(id);
+					taskTagsCache.value.set(id, detail?.tags ?? []);
+				} catch {
+					// ignore
+				}
+			}),
+		);
+		await tagStore.fetchTags();
+		await taskStore.fetchAllTasks();
+		customNewTagName.value = "";
+	} catch (err) {
+		console.error("Failed to assign tag to tasks:", err);
+	} finally {
+		isBatchOperating.value = false;
+		closeDropdowns();
+	}
+}
+
+async function handleBatchRemoveTag(tagName: string) {
+	const ids = Array.from(selectedTaskIds.value);
+	if (!ids.length || !tagName.trim()) return;
+	isBatchOperating.value = true;
+	try {
+		await Promise.all(ids.map((id) => removeTag(id, tagName.trim())));
+		await Promise.all(
+			ids.map(async (id) => {
+				try {
+					const detail = await getTaskDetail(id);
+					taskTagsCache.value.set(id, detail?.tags ?? []);
+				} catch {
+					// ignore
+				}
+			}),
+		);
+		await tagStore.fetchTags();
+		await taskStore.fetchAllTasks();
+	} catch (err) {
+		console.error("Failed to remove tag from tasks:", err);
+	} finally {
+		isBatchOperating.value = false;
+		closeDropdowns();
+	}
+}
+
+async function handleBatchDelete() {
+	const ids = Array.from(selectedTaskIds.value);
+	if (!ids.length) return;
+	const confirmDelete = window.confirm(
+		`Delete ${ids.length} selected task${ids.length > 1 ? "s" : ""}?`,
+	);
+	if (!confirmDelete) return;
+
+	isBatchOperating.value = true;
+	try {
+		for (const id of ids) {
+			await taskStore.deleteTask(id);
+		}
+		selectedTaskIds.value.clear();
+	} catch (err) {
+		console.error("Failed to delete selected tasks:", err);
+	} finally {
+		isBatchOperating.value = false;
+		closeDropdowns();
+	}
+}
+
+function handleTagPillClick(e: MouseEvent, tagName: string) {
+	e.stopPropagation();
+	filterStore.setSmartView(null);
+	filterStore.setListFilter(null);
+	listStore.setActiveView(null);
+	listStore.setActiveList(null);
+	filterStore.setTagFilter(tagName);
+	taskStore.setActiveTask(null);
+}
+
+function getTodayDateStr(): string {
+	const d = new Date();
+	const y = d.getFullYear();
+	const m = String(d.getMonth() + 1).padStart(2, "0");
+	const day = String(d.getDate()).padStart(2, "0");
+	return `${y}-${m}-${day}`;
+}
+
+function getTomorrowDateStr(): string {
+	const d = new Date();
+	d.setDate(d.getDate() + 1);
+	const y = d.getFullYear();
+	const m = String(d.getMonth() + 1).padStart(2, "0");
+	const day = String(d.getDate()).padStart(2, "0");
+	return `${y}-${m}-${day}`;
+}
+
+function getListName(listId: string): string {
+	return listStore.lists.find((l) => l.id === listId)?.name ?? "";
+}
 
 async function handleAddTask() {
 	const title = newTaskTitle.value.trim();
-	if (!title || !activeList.value) return;
+	if (!title) return;
+
+	let due: string | null = null;
+	if (listStore.activeView === "today") {
+		due = getTodayDateStr();
+	} else if (listStore.activeView === "tomorrow") {
+		due = getTomorrowDateStr();
+	} else if (listStore.activeView === "this_week") {
+		due = getTodayDateStr();
+	}
+
+	const targetListId =
+		activeList.value?.id ?? listStore.inboxList?.id ?? listStore.lists[0]?.id;
+	if (!targetListId) return;
 
 	try {
 		isAdding.value = true;
 		const created = await taskStore.addTask({
 			title,
-			list_id: activeList.value.id,
+			list_id: targetListId,
+			due,
 		});
+		if (filterStore.selectedTag) {
+			try {
+				await assignTag(created.id, filterStore.selectedTag);
+				// Also attach tag locally so immediate filtering reflects it
+				(created as { tags?: unknown }).tags = [filterStore.selectedTag];
+				await taskStore.fetchAllTasks();
+			} catch (tagErr) {
+				console.error("Failed to assign tag to created task:", tagErr);
+			}
+		}
 		newTaskTitle.value = "";
 		taskStore.setActiveTask(created.id);
 	} catch (err) {
@@ -51,6 +682,11 @@ async function handleToggleComplete(event: MouseEvent, taskId: string) {
 	event.stopPropagation();
 	try {
 		await taskStore.toggleTask(taskId);
+		// Refresh tag cache if needed
+		const detail = await getTaskDetail(taskId);
+		if (detail?.tags) {
+			taskTagsCache.value.set(taskId, detail.tags);
+		}
 	} catch (err) {
 		console.error("Failed to toggle task:", err);
 	}
@@ -59,19 +695,34 @@ async function handleToggleComplete(event: MouseEvent, taskId: string) {
 async function handleDeleteTask(event: MouseEvent, taskId: string) {
 	event.stopPropagation();
 	try {
+		selectedTaskIds.value.delete(taskId);
 		await taskStore.deleteTask(taskId);
 	} catch (err) {
 		console.error("Failed to delete task:", err);
 	}
 }
 
-function handleSelectTask(taskId: string) {
+function handleSelectTask(event: MouseEvent, taskId: string) {
+	// If the user clicks while holding meta/ctrl key, toggle multi-selection
+	if (event.metaKey || event.ctrlKey) {
+		handleToggleSelectTask(event, taskId);
+		return;
+	}
 	taskStore.setActiveTask(taskId);
+	uiStore.toggleDetail(true);
 }
 
 function formatDue(dateStr: string | null): string {
 	if (!dateStr) return "";
 	try {
+		const [y, m, d] = dateStr.slice(0, 10).split("-").map(Number);
+		if (y && m && d) {
+			const date = new Date(y, m - 1, d);
+			return date.toLocaleDateString(undefined, {
+				month: "short",
+				day: "numeric",
+			});
+		}
 		const date = new Date(dateStr);
 		return date.toLocaleDateString(undefined, {
 			month: "short",
@@ -85,43 +736,394 @@ function formatDue(dateStr: string | null): string {
 
 <template>
   <section class="flex flex-col h-full bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100 select-none overflow-hidden">
-    <!-- List Header -->
-    <div class="p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
-      <div class="min-w-0">
-        <h2 class="text-xl font-bold truncate flex items-center gap-2">
-          <span
-            v-if="activeList"
-            class="w-3 h-3 rounded-full shrink-0 inline-block"
-            :style="{ backgroundColor: activeList.color || '#10b981' }"
-          />
-          <span>{{ activeList ? activeList.name : 'No List Selected' }}</span>
-        </h2>
-        <p v-if="activeList" class="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-          {{ taskStore.incompleteTasks.length }} pending, {{ taskStore.completedTasks.length }} completed
-        </p>
-      </div>
-
-      <!-- Completed tasks toggle filter -->
-      <div v-if="activeList" class="flex items-center gap-2">
+    <!-- Header -->
+    <div class="p-3 sm:p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-2">
+      <div class="flex items-center gap-2.5 min-w-0">
+        <!-- Mobile Drawer Toggle Hamburger -->
         <button
           type="button"
+          @click="uiStore.toggleSidebar()"
+          class="md:hidden p-1.5 -ml-1 rounded-md text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer shrink-0"
+          title="Toggle Navigation Sidebar"
+        >
+          <Menu class="w-5 h-5" />
+        </button>
+
+        <div class="min-w-0">
+          <h2 class="text-lg sm:text-xl font-bold truncate flex items-center gap-2">
+            <!-- Tag Icon or View or List Icon -->
+            <TagIcon
+              v-if="filterStore.selectedTag"
+              class="w-5 h-5 text-emerald-500 shrink-0"
+            />
+            <Inbox
+              v-else-if="(activeList && activeList.name.toLowerCase() === 'inbox') || listStore.activeView === 'inbox'"
+              class="w-5 h-5 text-blue-500 shrink-0"
+            />
+            <CheckSquare
+              v-else-if="listStore.activeView === 'all'"
+              class="w-5 h-5 text-indigo-500 shrink-0"
+            />
+            <Calendar
+              v-else-if="listStore.activeView === 'today'"
+              class="w-5 h-5 text-emerald-500 shrink-0"
+            />
+            <Sunrise
+              v-else-if="listStore.activeView === 'tomorrow'"
+              class="w-5 h-5 text-amber-500 shrink-0"
+            />
+            <CalendarRange
+              v-else-if="listStore.activeView === 'this_week'"
+              class="w-5 h-5 text-purple-500 shrink-0"
+            />
+            <Trash2
+              v-else-if="listStore.activeView === 'trash'"
+              class="w-5 h-5 text-rose-500 shrink-0"
+            />
+            <span
+              v-else-if="activeList"
+              class="w-3 h-3 rounded-full shrink-0 inline-block"
+              :style="{ backgroundColor: activeList.color || '#10b981' }"
+            />
+
+            <span>{{ headerTitle }}</span>
+          </h2>
+          <p v-if="hasActiveSelection" class="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+            {{ taskStore.incompleteTasks.length }} pending, {{ taskStore.completedTasks.length }} completed
+          </p>
+        </div>
+      </div>
+
+      <!-- Right actions: Completed filter toggle + Detail panel toggle -->
+      <div class="flex items-center gap-1.5 shrink-0">
+        <button
+          v-if="hasActiveSelection"
+          type="button"
           @click="taskStore.setIncludeCompleted(!taskStore.includeCompleted)"
-          class="flex items-center gap-1 text-xs px-2.5 py-1 rounded-md border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-600 dark:text-zinc-300 cursor-pointer"
+          class="flex items-center gap-1 text-xs px-2 sm:px-2.5 py-1 rounded-md border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-600 dark:text-zinc-300 cursor-pointer"
           :title="taskStore.includeCompleted ? 'Hide completed tasks' : 'Show completed tasks'"
         >
           <ListFilter class="w-3.5 h-3.5" />
-          <span>{{ taskStore.includeCompleted ? 'Showing all' : 'Active only' }}</span>
+          <span class="hidden sm:inline">{{ taskStore.includeCompleted ? 'Showing all' : 'Active only' }}</span>
+        </button>
+
+        <!-- Toggle Right Detail Pane -->
+        <button
+          type="button"
+          @click="uiStore.toggleDetail()"
+          :title="uiStore.isDetailOpen ? 'Collapse task details' : 'Expand task details'"
+          class="p-1 sm:p-1.5 rounded-md border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 transition-colors cursor-pointer"
+        >
+          <PanelRightClose v-if="uiStore.isDetailOpen" class="w-4 h-4" />
+          <PanelRight v-else class="w-4 h-4" />
         </button>
       </div>
     </div>
 
+    <!-- Batch Action Toolbar (When tasks are available or selected) -->
+    <div
+      v-if="hasActiveSelection && visibleTasks.length > 0"
+      class="px-3 py-1.5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/90 flex flex-wrap items-center justify-between gap-2 text-xs"
+    >
+      <div class="flex items-center gap-1.5 flex-wrap">
+        <!-- Multi-select checkbox dropdown (Select All / None / Invert) -->
+        <div class="relative" data-dropdown-container>
+          <button
+            type="button"
+            @click="toggleDropdown('select')"
+            class="flex items-center gap-1 px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer"
+            title="Selection menu"
+          >
+            <CheckSquare v-if="allVisibleSelected" class="w-3.5 h-3.5 text-emerald-600" />
+            <MinusSquare v-else-if="someVisibleSelected" class="w-3.5 h-3.5 text-emerald-600" />
+            <Square v-else class="w-3.5 h-3.5 text-zinc-400" />
+            <ChevronDown class="w-3 h-3 opacity-60" />
+          </button>
+
+          <!-- Dropdown menu -->
+          <div
+            v-if="activeDropdown === 'select'"
+            class="absolute left-0 top-full mt-1 w-36 py-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md shadow-lg z-30 space-y-0.5"
+          >
+            <button
+              type="button"
+              @click="selectAll"
+              class="w-full text-left px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 cursor-pointer"
+            >
+              Select All
+            </button>
+            <button
+              type="button"
+              @click="selectNone"
+              class="w-full text-left px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 cursor-pointer"
+            >
+              Select None
+            </button>
+            <button
+              type="button"
+              @click="selectInvert"
+              class="w-full text-left px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 cursor-pointer"
+            >
+              Invert Selection
+            </button>
+          </div>
+        </div>
+
+        <!-- Selected count label -->
+        <span v-if="selectedTaskIds.size > 0" class="text-zinc-500 dark:text-zinc-400 font-medium px-1">
+          {{ selectedTaskIds.size }} selected
+        </span>
+
+        <!-- Action buttons (active only when >= 1 task selected) -->
+        <template v-if="selectedTaskIds.size > 0">
+          <!-- Mark Completed (✓) -->
+          <button
+            type="button"
+            @click="handleBatchComplete"
+            :disabled="isBatchOperating"
+            class="flex items-center gap-1 px-2 py-1 rounded bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors cursor-pointer disabled:opacity-50"
+            title="Mark selected completed"
+          >
+            <Check class="w-3.5 h-3.5" />
+            <span>Complete</span>
+          </button>
+
+          <!-- Postpone Menu (📅 ▾) -->
+          <div class="relative" data-dropdown-container>
+            <button
+              type="button"
+              @click="toggleDropdown('postpone')"
+              :disabled="isBatchOperating"
+              class="flex items-center gap-1 px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer disabled:opacity-50"
+              title="Postpone due date"
+            >
+              <CalendarPlus class="w-3.5 h-3.5 text-blue-500" />
+              <span>Postpone</span>
+              <ChevronDown class="w-3 h-3 opacity-60" />
+            </button>
+
+            <div
+              v-if="activeDropdown === 'postpone'"
+              class="absolute left-0 top-full mt-1 w-44 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md shadow-lg z-30 text-xs space-y-1"
+            >
+              <button
+                type="button"
+                @click="handleBatchPostpone(1)"
+                class="w-full text-left px-3 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 cursor-pointer"
+              >
+                +1 Day (Tomorrow)
+              </button>
+              <button
+                type="button"
+                @click="handleBatchPostpone(2)"
+                class="w-full text-left px-3 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 cursor-pointer"
+              >
+                +2 Days
+              </button>
+              <button
+                type="button"
+                @click="handleBatchPostpone(7)"
+                class="w-full text-left px-3 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 cursor-pointer"
+              >
+                +1 Week
+              </button>
+              <div class="border-t border-zinc-100 dark:border-zinc-800 pt-1 px-3">
+                <label class="block text-[10px] text-zinc-400 mb-0.5">Custom Date</label>
+                <div class="flex items-center gap-1">
+                  <input
+                    type="date"
+                    v-model="customPostponeDate"
+                    class="w-full px-1.5 py-0.5 border border-zinc-200 dark:border-zinc-700 rounded text-xs bg-white dark:bg-zinc-950 text-zinc-800 dark:text-zinc-200"
+                  />
+                  <button
+                    type="button"
+                    @click="handleBatchCustomDate"
+                    :disabled="!customPostponeDate"
+                    class="px-1.5 py-0.5 bg-emerald-600 text-white rounded text-[10px] cursor-pointer disabled:opacity-40"
+                  >
+                    Set
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Set Priority Menu (! ▾) -->
+          <div class="relative" data-dropdown-container>
+            <button
+              type="button"
+              @click="toggleDropdown('priority')"
+              :disabled="isBatchOperating"
+              class="flex items-center gap-1 px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer disabled:opacity-50"
+              title="Set priority"
+            >
+              <AlertCircle class="w-3.5 h-3.5 text-amber-500" />
+              <span>Priority</span>
+              <ChevronDown class="w-3 h-3 opacity-60" />
+            </button>
+
+            <div
+              v-if="activeDropdown === 'priority'"
+              class="absolute left-0 top-full mt-1 w-36 py-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md shadow-lg z-30 text-xs space-y-0.5"
+            >
+              <button
+                type="button"
+                @click="handleBatchSetPriority(PRIORITY.HIGH)"
+                class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-red-600 dark:text-red-400 font-medium cursor-pointer"
+              >
+                <span>Priority 1</span>
+                <span class="text-[10px] px-1 rounded bg-red-100 dark:bg-red-950">P1</span>
+              </button>
+              <button
+                type="button"
+                @click="handleBatchSetPriority(PRIORITY.MEDIUM)"
+                class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-amber-600 dark:text-amber-400 font-medium cursor-pointer"
+              >
+                <span>Priority 2</span>
+                <span class="text-[10px] px-1 rounded bg-amber-100 dark:bg-amber-950">P2</span>
+              </button>
+              <button
+                type="button"
+                @click="handleBatchSetPriority(PRIORITY.LOW)"
+                class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-blue-600 dark:text-blue-400 font-medium cursor-pointer"
+              >
+                <span>Priority 3</span>
+                <span class="text-[10px] px-1 rounded bg-blue-100 dark:bg-blue-950">P3</span>
+              </button>
+              <div class="border-t border-zinc-100 dark:border-zinc-800 my-1"></div>
+              <button
+                type="button"
+                @click="handleBatchSetPriority(null)"
+                class="w-full text-left px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 cursor-pointer"
+              >
+                None
+              </button>
+            </div>
+          </div>
+
+          <!-- Move to List (📋 ▾) -->
+          <div class="relative" data-dropdown-container>
+            <button
+              type="button"
+              @click="toggleDropdown('list')"
+              :disabled="isBatchOperating"
+              class="flex items-center gap-1 px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer disabled:opacity-50"
+              title="Move to list"
+            >
+              <FolderInput class="w-3.5 h-3.5 text-indigo-500" />
+              <span>List</span>
+              <ChevronDown class="w-3 h-3 opacity-60" />
+            </button>
+
+            <div
+              v-if="activeDropdown === 'list'"
+              class="absolute left-0 top-full mt-1 w-44 py-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md shadow-lg z-30 text-xs max-h-48 overflow-y-auto space-y-0.5"
+            >
+              <button
+                v-for="list in listStore.lists"
+                :key="list.id"
+                type="button"
+                @click="handleBatchMoveToList(list.id)"
+                class="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 text-left cursor-pointer"
+              >
+                <span
+                  class="w-2 h-2 rounded-full shrink-0"
+                  :style="{ backgroundColor: list.color || '#10b981' }"
+                />
+                <span class="truncate">{{ list.name }}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Add/Remove Tags (🏷 ▾) -->
+          <div class="relative" data-dropdown-container>
+            <button
+              type="button"
+              @click="toggleDropdown('tag')"
+              :disabled="isBatchOperating"
+              class="flex items-center gap-1 px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer disabled:opacity-50"
+              title="Tags"
+            >
+              <Tags class="w-3.5 h-3.5 text-purple-500" />
+              <span>Tags</span>
+              <ChevronDown class="w-3 h-3 opacity-60" />
+            </button>
+
+            <div
+              v-if="activeDropdown === 'tag'"
+              class="absolute left-0 top-full mt-1 w-52 p-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md shadow-lg z-30 text-xs space-y-2"
+            >
+              <div class="flex items-center gap-1">
+                <input
+                  type="text"
+                  v-model="customNewTagName"
+                  placeholder="Tag name..."
+                  @keyup.enter="handleBatchAssignTag(customNewTagName)"
+                  class="w-full px-2 py-1 border border-zinc-200 dark:border-zinc-700 rounded text-xs bg-white dark:bg-zinc-950 text-zinc-800 dark:text-zinc-200"
+                />
+                <button
+                  type="button"
+                  @click="handleBatchAssignTag(customNewTagName)"
+                  :disabled="!customNewTagName.trim()"
+                  class="px-2 py-1 bg-emerald-600 text-white rounded text-xs cursor-pointer disabled:opacity-40"
+                >
+                  Add
+                </button>
+              </div>
+
+              <div v-if="tagStore.tagsWithCounts.length > 0" class="border-t border-zinc-100 dark:border-zinc-800 pt-1.5 max-h-36 overflow-y-auto space-y-1">
+                <div class="text-[10px] uppercase font-semibold text-zinc-400">Existing tags</div>
+                <div
+                  v-for="tag in tagStore.tagsWithCounts"
+                  :key="tag.id"
+                  class="flex items-center justify-between gap-1 px-1.5 py-0.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                >
+                  <span class="truncate text-zinc-700 dark:text-zinc-300">#{{ tag.name }}</span>
+                  <div class="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      @click="handleBatchAssignTag(tag.name)"
+                      class="px-1.5 py-0.2 rounded bg-emerald-50 dark:bg-emerald-950 text-emerald-600 text-[10px] hover:bg-emerald-100 cursor-pointer"
+                    >
+                      +
+                    </button>
+                    <button
+                      type="button"
+                      @click="handleBatchRemoveTag(tag.name)"
+                      class="px-1.5 py-0.2 rounded bg-rose-50 dark:bg-rose-950 text-rose-600 text-[10px] hover:bg-rose-100 cursor-pointer"
+                    >
+                      -
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Delete / Move to Trash -->
+          <button
+            type="button"
+            @click="handleBatchDelete"
+            :disabled="isBatchOperating"
+            class="flex items-center gap-1 px-2 py-1 rounded border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-900/50 transition-colors cursor-pointer disabled:opacity-50"
+            title="Delete selected tasks"
+          >
+            <Trash2 class="w-3.5 h-3.5" />
+            <span>Delete</span>
+          </button>
+        </template>
+      </div>
+    </div>
+
     <!-- Quick Add Input -->
-    <div v-if="activeList" class="p-3 border-b border-zinc-100 dark:border-zinc-800/60 bg-zinc-50/50 dark:bg-zinc-900/50">
+    <div v-if="hasActiveSelection" class="p-3 border-b border-zinc-100 dark:border-zinc-800/60 bg-zinc-50/50 dark:bg-zinc-900/50">
       <form @submit.prevent="handleAddTask" class="relative flex items-center">
         <input
+          ref="quickAddInputRef"
           v-model="newTaskTitle"
+
           type="text"
-          :placeholder="`Add a task to ${activeList.name}...`"
+          :placeholder="quickAddPlaceholder"
           :disabled="isAdding"
           class="w-full pl-3 pr-10 py-2 text-sm rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-hidden focus:ring-1 focus:ring-emerald-500 shadow-2xs"
         />
@@ -138,10 +1140,10 @@ function formatDue(dateStr: string | null): string {
 
     <!-- Tasks List Container -->
     <div class="flex-1 overflow-y-auto p-3 space-y-1">
-      <!-- Empty state: No active list -->
-      <div v-if="!activeList" class="h-full flex flex-col items-center justify-center text-center p-6 text-zinc-400 dark:text-zinc-500">
+      <!-- Empty state: No selection -->
+      <div v-if="!hasActiveSelection" class="h-full flex flex-col items-center justify-center text-center p-6 text-zinc-400 dark:text-zinc-500">
         <CheckSquare class="w-12 h-12 mb-3 opacity-40 stroke-1" />
-        <p class="text-sm font-medium">Select a list from the sidebar</p>
+        <p class="text-sm font-medium">Select a list or view from the sidebar</p>
         <p class="text-xs mt-1">Or create a new list to get started.</p>
       </div>
 
@@ -150,7 +1152,7 @@ function formatDue(dateStr: string | null): string {
         Loading tasks...
       </div>
 
-      <!-- Empty state: Active list has no tasks -->
+      <!-- Empty state: Active list/view has no tasks -->
       <div v-else-if="visibleTasks.length === 0" class="h-full flex flex-col items-center justify-center text-center p-6 text-zinc-400 dark:text-zinc-500">
         <CheckCircle2 class="w-12 h-12 mb-3 text-emerald-500/40 stroke-1" />
         <p class="text-sm font-medium">All clear!</p>
@@ -161,16 +1163,35 @@ function formatDue(dateStr: string | null): string {
       <div
         v-for="task in visibleTasks"
         :key="task.id"
-        @click="handleSelectTask(task.id)"
+        :data-task-id="task.id"
+        @click="handleSelectTask($event, task.id)"
+        @contextmenu="handleTaskContextMenu($event, task.id)"
+
         class="group flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg border text-sm cursor-pointer transition-all"
+
         :class="[
           task.id === taskStore.activeTaskId
-            ? 'bg-emerald-50/60 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800/80 shadow-2xs'
-            : 'border-zinc-100 dark:border-zinc-800/80 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 hover:border-zinc-200 dark:hover:border-zinc-700'
+            ? 'bg-emerald-50/70 dark:bg-emerald-950/40 border-emerald-400 dark:border-emerald-700 shadow-2xs'
+            : selectedTaskIds.has(task.id)
+              ? 'bg-blue-50/40 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900/60'
+              : 'border-zinc-100 dark:border-zinc-800/80 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 hover:border-zinc-200 dark:hover:border-zinc-700'
         ]"
       >
-        <!-- Task Checkbox & Title -->
-        <div class="flex items-center gap-3 min-w-0 flex-1">
+        <!-- Task Select Box, Complete Checkbox & Title -->
+        <div class="flex items-center gap-2.5 min-w-0 flex-1">
+          <!-- Multi-selection checkbox -->
+          <button
+            type="button"
+            @click="handleToggleSelectTask($event, task.id)"
+            class="shrink-0 p-0.5 rounded text-zinc-300 dark:text-zinc-600 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors cursor-pointer"
+            :class="{ 'opacity-100 text-emerald-600 dark:text-emerald-500': selectedTaskIds.has(task.id), 'opacity-0 group-hover:opacity-100': !selectedTaskIds.has(task.id) }"
+            :title="selectedTaskIds.has(task.id) ? 'Deselect task' : 'Select task'"
+          >
+            <CheckSquare v-if="selectedTaskIds.has(task.id)" class="w-4 h-4 text-emerald-600 dark:text-emerald-500" />
+            <Square v-else class="w-4 h-4" />
+          </button>
+
+          <!-- Task Complete Toggle -->
           <button
             type="button"
             @click="handleToggleComplete($event, task.id)"
@@ -181,36 +1202,71 @@ function formatDue(dateStr: string | null): string {
             <Circle v-else class="w-5 h-5 text-zinc-300 dark:text-zinc-600 hover:text-emerald-500" />
           </button>
 
-          <span
-            class="truncate text-sm font-medium"
-            :class="[
-              task.completed
-                ? 'line-through text-zinc-400 dark:text-zinc-500 font-normal'
-                : 'text-zinc-800 dark:text-zinc-200'
-            ]"
-          >
-            {{ task.title }}
-          </span>
+          <!-- Title and inline Tag Pills -->
+          <div class="min-w-0 flex-1 flex flex-wrap items-center gap-1.5">
+            <span
+              class="text-sm font-medium truncate"
+              :class="[
+                task.completed
+                  ? 'line-through text-zinc-400 dark:text-zinc-500 font-normal'
+                  : 'text-zinc-800 dark:text-zinc-200'
+              ]"
+            >
+              {{ task.title }}
+            </span>
+
+            <!-- Tag Pills on Task Row -->
+            <div v-if="getTaskTags(task.id).length > 0" class="flex items-center gap-1 flex-wrap shrink-0">
+              <button
+                v-for="tag in getTaskTags(task.id)"
+                :key="tag.id"
+                type="button"
+                @click="handleTagPillClick($event, tag.name)"
+                class="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/80 hover:bg-emerald-100 transition-colors cursor-pointer"
+              >
+                <span class="opacity-60">#</span>
+                <span>{{ tag.name }}</span>
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- Task Metadata Badges & Actions -->
         <div class="flex items-center gap-2 shrink-0">
-          <!-- Priority indicator -->
+          <!-- Subtask count badge -->
+          <span
+            v-if="getSubtaskCount(task.id) && getSubtaskCount(task.id)!.total > 0"
+            class="inline-flex items-center gap-1 text-[11px] font-medium px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700/60"
+            :title="`${getSubtaskCount(task.id)!.incomplete} of ${getSubtaskCount(task.id)!.total} subtasks remaining`"
+          >
+            <ListTree class="w-3 h-3 text-zinc-400" />
+            <span>{{ getSubtaskCount(task.id)!.total - getSubtaskCount(task.id)!.incomplete }}/{{ getSubtaskCount(task.id)!.total }}</span>
+          </span>
+
+          <!-- List badge (shown in Views) -->
+          <span
+            v-if="isView && getListName(task.list_id)"
+            class="text-[10px] font-medium text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded"
+          >
+            {{ getListName(task.list_id) }}
+          </span>
+
+          <!-- Priority indicator badge / border color (P1, P2, P3, None) -->
           <span
             v-if="task.priority === PRIORITY.HIGH"
-            class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-400"
+            class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-900"
           >
             P1
           </span>
           <span
             v-else-if="task.priority === PRIORITY.MEDIUM"
-            class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-400"
+            class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900"
           >
             P2
           </span>
           <span
             v-else-if="task.priority === PRIORITY.LOW"
-            class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-400"
+            class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-900"
           >
             P3
           </span>
@@ -228,7 +1284,7 @@ function formatDue(dateStr: string | null): string {
           <button
             type="button"
             title="Delete task"
-            class="opacity-0 group-hover:opacity-100 hover:text-red-500 p-1 text-zinc-400 transition-opacity"
+            class="opacity-0 group-hover:opacity-100 hover:text-red-500 p-1 text-zinc-400 transition-opacity cursor-pointer"
             @click="handleDeleteTask($event, task.id)"
           >
             <Trash2 class="w-3.5 h-3.5" />
@@ -236,5 +1292,41 @@ function formatDue(dateStr: string | null): string {
         </div>
       </div>
     </div>
+    <!-- Task Context Menu: Postpone Actions -->
+    <div
+      v-if="contextMenu.visible"
+      class="fixed z-50 w-48 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-xl text-xs space-y-0.5"
+      :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
+      @click.stop
+    >
+      <div class="px-3 py-1 text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">
+        Postpone
+      </div>
+      <button
+        type="button"
+        @click="handleContextMenuPostpone(1)"
+        class="w-full flex items-center gap-2 px-3 py-1.5 text-left text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+      >
+        <Calendar class="w-3.5 h-3.5 text-zinc-400" />
+        <span>+1 Day (Tomorrow)</span>
+      </button>
+      <button
+        type="button"
+        @click="handleContextMenuPostpone(2)"
+        class="w-full flex items-center gap-2 px-3 py-1.5 text-left text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+      >
+        <CalendarPlus class="w-3.5 h-3.5 text-zinc-400" />
+        <span>+2 Days</span>
+      </button>
+      <button
+        type="button"
+        @click="handleContextMenuPostpone(7)"
+        class="w-full flex items-center gap-2 px-3 py-1.5 text-left text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+      >
+        <CalendarRange class="w-3.5 h-3.5 text-zinc-400" />
+        <span>+1 Week</span>
+      </button>
+    </div>
+
   </section>
 </template>

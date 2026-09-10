@@ -2,7 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
 	AddNoteInput,
 	AddReminderInput,
+	BatchUpdateTasksInput,
 	CreateTaskInput,
+	GetTasksOptions,
 	ImportBackupResult,
 	List,
 	Note,
@@ -10,6 +12,9 @@ import type {
 	Reminder,
 	Tag,
 	Task,
+	TaskDetail,
+	UpdateListInput,
+	UpdateNoteInput,
 	UpdateTaskInput,
 } from "../models/index.ts";
 
@@ -60,6 +65,15 @@ export async function createList(
 	});
 }
 
+export async function updateList(input: UpdateListInput): Promise<List> {
+	return safeInvoke<List>("update_list", {
+		id: input.id,
+		name: input.name,
+		color: input.color,
+		position: input.position,
+	});
+}
+
 export async function deleteList(id: string): Promise<void> {
 	return safeInvoke<void>("delete_list", { id });
 }
@@ -69,13 +83,42 @@ export async function deleteList(id: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export async function getTasks(
-	listId: string,
+	listId?: string | null,
 	includeCompleted?: boolean,
+	view?: string | null,
+	tag?: string | null,
+	dueFrom?: string | null,
+	dueTo?: string | null,
+	parentId?: string | null,
 ): Promise<Task[]> {
-	return safeInvoke<Task[]>("get_tasks", {
-		listId,
-		includeCompleted: includeCompleted ?? null,
+	const res = await safeInvoke<Task[]>("get_tasks", {
+		listId: listId ?? null,
+		includeCompleted: includeCompleted ?? false,
+		view: view ?? null,
+		tag: tag ?? null,
+		dueFrom: dueFrom ?? null,
+		dueTo: dueTo ?? null,
+		parentId: parentId !== undefined ? parentId : null,
 	});
+	return res ?? [];
+}
+
+export async function getTasksWithOptions(
+	options: GetTasksOptions,
+): Promise<Task[]> {
+	return getTasks(
+		options.listId,
+		options.includeCompleted,
+		options.view,
+		options.tag,
+		options.dueFrom,
+		options.dueTo,
+		options.parentId,
+	);
+}
+
+export async function getTaskDetail(id: string): Promise<TaskDetail | null> {
+	return safeInvoke<TaskDetail | null>("get_task_detail", { id });
 }
 
 export async function createTask(input: CreateTaskInput): Promise<Task> {
@@ -103,6 +146,12 @@ export async function toggleTaskComplete(
 	return safeInvoke<Task>("toggle_task_complete", { id, completed });
 }
 
+export async function batchUpdateTasks(
+	input: BatchUpdateTasksInput,
+): Promise<Task[]> {
+	return safeInvoke<Task[]>("batch_update_tasks", { input });
+}
+
 // ---------------------------------------------------------------------------
 // Tags & Notes API
 // ---------------------------------------------------------------------------
@@ -121,6 +170,14 @@ export async function createTag(
 	});
 }
 
+export async function assignTag(taskId: string, tagId: string): Promise<void> {
+	return safeInvoke<void>("assign_tag", { taskId, tagId });
+}
+
+export async function removeTag(taskId: string, tagId: string): Promise<void> {
+	return safeInvoke<void>("remove_tag", { taskId, tagId });
+}
+
 export async function getNotes(taskId: string): Promise<Note[]> {
 	return safeInvoke<Note[]>("get_notes", { taskId });
 }
@@ -131,6 +188,18 @@ export async function addNote(input: AddNoteInput): Promise<Note> {
 		content: input.content,
 		title: input.title ?? null,
 	});
+}
+
+export async function updateNote(input: UpdateNoteInput): Promise<Note> {
+	return safeInvoke<Note>("update_note", {
+		id: input.id,
+		content: input.content,
+		title: input.title,
+	});
+}
+
+export async function deleteNote(id: string): Promise<void> {
+	return safeInvoke<void>("delete_note", { id });
 }
 
 // ---------------------------------------------------------------------------
@@ -173,22 +242,30 @@ export const api = {
 	lists: {
 		getAll: getLists,
 		create: createList,
+		update: updateList,
 		delete: deleteList,
 	},
 	tasks: {
 		getAll: getTasks,
+		getAllWithOptions: getTasksWithOptions,
+		getDetail: getTaskDetail,
 		create: createTask,
 		update: updateTask,
 		delete: deleteTask,
 		toggleComplete: toggleTaskComplete,
+		batchUpdate: batchUpdateTasks,
 	},
 	tags: {
 		getAll: getTags,
 		create: createTag,
+		assign: assignTag,
+		remove: removeTag,
 	},
 	notes: {
 		getByTaskId: getNotes,
 		add: addNote,
+		update: updateNote,
+		delete: deleteNote,
 	},
 	reminders: {
 		getByTaskId: getReminders,
