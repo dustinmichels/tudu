@@ -1,0 +1,4 @@
+[tasks."db:reset"]
+description = "Totally reset the local development database"
+run = "./scripts/reset-db.sh $@"
+alias = ["reset-db", "db-reset"]

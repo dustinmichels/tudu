@@ -1,0 +1,237 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tudu.app/schemas/opentask-v1.json",
+  "title": "OpenTask Document",
+  "description": "An interoperable interchange format for task managers including TuDu, RTM, JMAP, Todoist, TickTick, and Google Tasks.",
+  "type": "object",
+  "required": ["version", "lists", "tasks"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "enum": ["1.0"]
+    },
+    "exported_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source": {
+      "type": "string",
+      "description": "Originating application identifier (e.g., 'tudu', 'rtm', 'todoist', 'ticktick', 'google_tasks', 'jmap')."
+    },
+    "lists": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/TaskList"
+      }
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Tag"
+      }
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Task"
+      }
+    }
+  },
+  "$defs": {
+    "TaskList": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "color": { "type": ["string", "null"] },
+        "position": { "type": "integer", "default": 0 },
+        "is_archived": { "type": "boolean", "default": false },
+        "extra": {
+          "type": "object",
+          "description": "Unmapped vendor-specific attributes (e.g., smart list queries, project colors)."
+        }
+      }
+    },
+    "Tag": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "color": { "type": ["string", "null"] }
+      }
+    },
+    "Note": {
+      "type": "object",
+      "required": ["id", "content"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": ["string", "null"] },
+        "content": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "ChecklistItem": {
+      "type": "object",
+      "required": ["id", "title", "completed"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "completed": { "type": "boolean" },
+        "position": { "type": "integer", "default": 0 }
+      }
+    },
+    "Reminder": {
+      "type": "object",
+      "required": ["id", "trigger"],
+      "properties": {
+        "id": { "type": "string" },
+        "trigger": {
+          "type": "string",
+          "description": "ISO 8601 relative duration offset (e.g., '-PT15M', '-P1D') relative to due/start, or absolute ISO date-time."
+        },
+        "relative_to": {
+          "type": "string",
+          "enum": ["due", "start"],
+          "default": "due"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["display", "audio", "email"],
+          "default": "display"
+        },
+        "description": { "type": ["string", "null"] }
+      }
+    },
+    "GeoLocation": {
+      "type": "object",
+      "required": ["latitude", "longitude"],
+      "properties": {
+        "latitude": { "type": "number", "minimum": -90, "maximum": 90 },
+        "longitude": { "type": "number", "minimum": -180, "maximum": 180 }
+      }
+    },
+    "Task": {
+      "type": "object",
+      "required": ["id", "list_id", "title"],
+      "properties": {
+        "id": { "type": "string" },
+        "uid": {
+          "type": ["string", "null"],
+          "description": "RFC 5545 globally unique identifier for CalDAV/iCalendar round-trip compatibility."
+        },
+        "list_id": { "type": "string" },
+        "parent_id": {
+          "type": ["string", "null"],
+          "description": "ID of parent task for hierarchical subtasks."
+        },
+        "title": { "type": "string" },
+        "description": {
+          "type": ["string", "null"],
+          "description": "Primary markdown/plain-text description."
+        },
+        "notes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Note" },
+          "description": "Multi-note array for systems like RTM and TuDu."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["needs_action", "in_progress", "completed", "cancelled"],
+          "default": "needs_action"
+        },
+        "completed_at": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
+        "due": {
+          "type": ["string", "null"],
+          "description": "ISO 8601 string (e.g., '2026-09-10' or '2026-09-10T17:00:00Z')."
+        },
+        "is_all_day": {
+          "type": "boolean",
+          "default": false
+        },
+        "start": {
+          "type": ["string", "null"],
+          "description": "Start date/time for time-blocking or scheduling."
+        },
+        "duration": {
+          "type": ["string", "null"],
+          "description": "Planned task duration as an ISO 8601 duration string (e.g., 'PT1H', 'PT30M')."
+        },
+        "timezone": {
+          "type": ["string", "null"],
+          "description": "IANA timezone identifier (e.g., 'America/New_York')."
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["high", "medium", "low", "none"],
+          "default": "none"
+        },
+        "priority_raw": {
+          "type": ["integer", "string", "null"],
+          "description": "Original raw priority value from the exporting system to prevent loss."
+        },
+        "percent_complete": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 0,
+          "description": "Progress percentage (0..100) per RFC 5545 PERCENT-COMPLETE and JMAP percentComplete."
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        },
+        "rrule": {
+          "type": ["string", "null"],
+          "description": "RFC 5545 iCalendar RRULE string (e.g., 'FREQ=WEEKLY;INTERVAL=1;BYDAY=MO')."
+        },
+        "repeats": {
+          "type": ["string", "null"],
+          "description": "Alias for rrule for backwards compatibility with TuDu and RTM."
+        },
+        "location": {
+          "type": ["string", "null"],
+          "description": "Location name or address string."
+        },
+        "geo": {
+          "$ref": "#/$defs/GeoLocation",
+          "description": "Geographic coordinates matching RFC 5545 GEO (latitude and longitude)."
+        },
+        "color": {
+          "type": ["string", "null"],
+          "description": "Display color code or CSS color string (RFC 7986 COLOR)."
+        },
+        "url": {
+          "type": ["string", "null"],
+          "format": "uri"
+        },
+        "position": {
+          "type": "integer",
+          "default": 0
+        },
+        "checklist": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ChecklistItem" }
+        },
+        "reminders": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Reminder" },
+          "description": "Alarm and notification triggers matching RFC 5545 VALARM and JMAP alerts."
+        },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "deleted_at": { "type": ["string", "null"], "format": "date-time" },
+        "extra": {
+          "type": "object",
+          "description": "Preserved vendor-specific attributes (e.g. RTM postpone count, Google position tokens)."
+        }
+      }
+    }
+  }
+}
