@@ -7,7 +7,7 @@ import {
 	Upload,
 	X,
 } from "lucide-vue-next";
-import { ref } from "vue";
+import { onMounted, onUnmounted, ref } from "vue";
 import { api } from "../services/api.ts";
 import { mapRememberTheMilkToOpenTask } from "../services/rememberTheMilk.ts";
 import { useListStore } from "../stores/lists.ts";
@@ -164,6 +164,21 @@ function closeModal() {
 	errorMessage.value = null;
 	successMessage.value = null;
 }
+
+function handleKeyDown(e: KeyboardEvent) {
+	if (e.key === "Escape" && uiStore.isImportOpen) {
+		e.preventDefault();
+		closeModal();
+	}
+}
+
+onMounted(() => {
+	window.addEventListener("keydown", handleKeyDown);
+});
+
+onUnmounted(() => {
+	window.removeEventListener("keydown", handleKeyDown);
+});
 </script>
 
 <template>

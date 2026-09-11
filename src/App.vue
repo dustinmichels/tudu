@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, watch } from "vue";
+import CommandPaletteModal from "./components/CommandPaletteModal.vue";
 import GlobalHeader from "./components/GlobalHeader.vue";
 import ImportModal from "./components/ImportModal.vue";
 import KeyboardShortcutsModal from "./components/KeyboardShortcutsModal.vue";
@@ -121,7 +122,7 @@ watch(
       <!-- Desktop (lg+): Collapsible side column. Tablet/Mobile (<lg): Slide-over / stacked sheet -->
       <aside
         v-show="uiStore.isDetailOpen"
-        class="fixed inset-y-0 right-0 z-50 lg:static lg:z-auto h-full w-full sm:w-96 lg:w-80 shrink-0 border-l border-zinc-200 dark:border-zinc-800 transition-all duration-200 ease-in-out shadow-2xl lg:shadow-none bg-zinc-50 dark:bg-zinc-950"
+        class="fixed inset-y-0 right-0 z-50 lg:static lg:z-auto h-full w-full sm:w-96 lg:w-96 shrink-0 border-l border-zinc-200 dark:border-zinc-800 transition-all duration-200 ease-in-out shadow-2xl lg:shadow-none bg-zinc-50 dark:bg-zinc-950"
       >
         <TaskDetail class="w-full h-full" />
       </aside>
@@ -130,5 +131,6 @@ watch(
     <!-- Modals -->
     <ImportModal />
     <KeyboardShortcutsModal />
+    <CommandPaletteModal />
   </div>
 </template>

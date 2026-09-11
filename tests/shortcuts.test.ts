@@ -239,4 +239,42 @@ describe("Keyboard Shortcuts & Navigation", () => {
 		uiStore.toggleShortcuts();
 		expect(uiStore.isShortcutsOpen).toBe(true);
 	});
+
+	it("controls command palette modal state and modes via UI store", () => {
+		const uiStore = useUIStore();
+		expect(uiStore.isCommandPaletteOpen).toBe(false);
+		expect(uiStore.commandPaletteInitialMode).toBe("commands");
+
+		// Open in command mode (Cmd+Shift+P)
+		uiStore.openCommandPalette("commands");
+		expect(uiStore.isCommandPaletteOpen).toBe(true);
+		expect(uiStore.commandPaletteInitialMode).toBe("commands");
+
+		// Close
+		uiStore.toggleCommandPalette(false);
+		expect(uiStore.isCommandPaletteOpen).toBe(false);
+
+		// Open in list mode (Cmd+P)
+		uiStore.openCommandPalette("lists");
+		expect(uiStore.isCommandPaletteOpen).toBe(true);
+		expect(uiStore.commandPaletteInitialMode).toBe("lists");
+
+		// Toggle command palette
+		uiStore.toggleCommandPalette();
+		expect(uiStore.isCommandPaletteOpen).toBe(false);
+	});
+
+	it("toggles sidebar and detail panel via UI store (Zed / VS Code shortcuts)", () => {
+		const uiStore = useUIStore();
+		const initialSidebar = uiStore.isSidebarOpen;
+		const initialDetail = uiStore.isDetailOpen;
+
+		// Cmd+B toggles sidebar
+		uiStore.toggleSidebar();
+		expect(uiStore.isSidebarOpen).toBe(!initialSidebar);
+
+		// Cmd+J toggles detail panel
+		uiStore.toggleDetail();
+		expect(uiStore.isDetailOpen).toBe(!initialDetail);
+	});
 });

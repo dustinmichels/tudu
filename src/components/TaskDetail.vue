@@ -973,7 +973,7 @@ function formatDate(dateStr: string | null | undefined): string {
                 @click="applyDuePreset('next_week')"
                 class="px-2 py-0.5 text-[11px] font-medium bg-zinc-200/60 dark:bg-zinc-800/60 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer"
               >
-                Next Week
+                1 week
               </button>
               <button
                 type="button"

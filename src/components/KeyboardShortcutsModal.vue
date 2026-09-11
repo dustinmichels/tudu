@@ -34,6 +34,36 @@ interface ShortcutCategory {
 
 const shortcutCategories: ShortcutCategory[] = [
 	{
+		title: "Command Palette & Quick Open",
+		shortcuts: [
+			{
+				keys: ["⌘", "Shift", "P"],
+				description: "Open Command Palette / Control Panel",
+			},
+			{
+				keys: ["⌘", "P"],
+				description: "Quick open list or smart view",
+			},
+		],
+	},
+	{
+		title: "View & Layout (Zed / VS Code)",
+		shortcuts: [
+			{
+				keys: ["⌘", "B"],
+				description: "Toggle navigation sidebar",
+			},
+			{
+				keys: ["⌘", "J"],
+				description: "Toggle task detail panel",
+			},
+			{
+				keys: ["⌘", "H"],
+				description: "Toggle show / hide completed tasks",
+			},
+		],
+	},
+	{
 		title: "Navigation",
 		shortcuts: [
 			{
@@ -53,8 +83,8 @@ const shortcutCategories: ShortcutCategory[] = [
 				description: "Select previous task in list",
 			},
 			{
-				keys: ["/"],
-				description: "Focus global search",
+				keys: ["/", "or", "⌘F"],
+				description: "Focus search bar",
 			},
 			{
 				keys: ["t"],
@@ -66,11 +96,7 @@ const shortcutCategories: ShortcutCategory[] = [
 		title: "Task Actions",
 		shortcuts: [
 			{
-				keys: ["Enter"],
-				description: "Mark selected task as completed / toggle complete",
-			},
-			{
-				keys: ["c"],
+				keys: ["Enter", "or", "c"],
 				description: "Mark selected task as completed / toggle complete",
 			},
 			{
@@ -85,6 +111,10 @@ const shortcutCategories: ShortcutCategory[] = [
 				keys: ["4"],
 				description: "Clear task priority",
 			},
+			{
+				keys: ["Backspace", "or", "d"],
+				description: "Delete / Trash selected task",
+			},
 		],
 	},
 	{
@@ -96,7 +126,7 @@ const shortcutCategories: ShortcutCategory[] = [
 			},
 			{
 				keys: ["Esc"],
-				description: "Close dialogs / modals",
+				description: "Close dialogs / command palette / modals",
 			},
 		],
 	},

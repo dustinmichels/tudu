@@ -10,6 +10,7 @@ import {
 	ChevronDown,
 	Circle,
 	CornerDownLeft,
+	Flag,
 	FolderInput,
 	Inbox,
 	ListFilter,
@@ -24,7 +25,7 @@ import {
 	Tags,
 	Trash2,
 } from "lucide-vue-next";
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { PRIORITY, type Priority, type Tag } from "../models/index.ts";
 import { assignTag, getTaskDetail, removeTag } from "../services/api.ts";
 import { useFilterStore } from "../stores/filters.ts";
@@ -32,6 +33,16 @@ import { useListStore } from "../stores/lists.ts";
 import { useTagStore } from "../stores/tags.ts";
 import { useTaskStore } from "../stores/tasks.ts";
 import { useUIStore } from "../stores/ui.ts";
+import {
+	type ActiveSmartToken,
+	detectSmartToken,
+	getDueSuggestions,
+	getPrioritySuggestions,
+	getTagAndListSuggestions,
+	parseSmartAdd,
+	type SmartSuggestion,
+} from "../utils/smartAdd.ts";
+import { compareByCompletion } from "../utils/sorting.ts";
 
 const listStore = useListStore();
 const taskStore = useTaskStore();
@@ -42,6 +53,120 @@ const uiStore = useUIStore();
 const newTaskTitle = ref("");
 const quickAddInputRef = ref<HTMLInputElement | null>(null);
 const isAdding = ref(false);
+
+// ---------------------------------------------------------------------------
+// Smart Add & Shortcuts Dropdown State (#tag, ^due, !priority)
+// ---------------------------------------------------------------------------
+const activeSmartToken = ref<ActiveSmartToken | null>(null);
+const smartSuggestions = ref<SmartSuggestion[]>([]);
+const selectedSmartIndex = ref(0);
+const isSmartMenuOpen = ref(false);
+
+function updateSmartDropdown() {
+	const input = quickAddInputRef.value;
+	if (!input) {
+		isSmartMenuOpen.value = false;
+		return;
+	}
+	const cursorPos = input.selectionStart ?? newTaskTitle.value.length;
+	const token = detectSmartToken(newTaskTitle.value, cursorPos);
+	if (!token) {
+		isSmartMenuOpen.value = false;
+		activeSmartToken.value = null;
+		smartSuggestions.value = [];
+		return;
+	}
+
+	activeSmartToken.value = token;
+	if (token.prefix === "#") {
+		const tagNames = tagStore.tagsWithCounts.map((t) => t.name);
+		const listNames = listStore.lists.map((l) => l.name);
+		smartSuggestions.value = getTagAndListSuggestions(
+			tagNames,
+			listNames,
+			token.query,
+		);
+	} else if (token.prefix === "^") {
+		smartSuggestions.value = getDueSuggestions(token.query);
+	} else if (token.prefix === "!") {
+		smartSuggestions.value = getPrioritySuggestions(token.query);
+	}
+
+	isSmartMenuOpen.value = smartSuggestions.value.length > 0;
+	selectedSmartIndex.value = 0;
+}
+
+function selectSmartSuggestion(suggestion: SmartSuggestion) {
+	const token = activeSmartToken.value;
+	if (!token || !quickAddInputRef.value) return;
+
+	const currentText = newTaskTitle.value;
+	const before = currentText.slice(0, token.startIndex);
+	const after = currentText.slice(token.endIndex);
+
+	// Prefix remains (#, ^, or !) followed by suggestion.insertValue and a space
+	const replacement = `${token.prefix}${suggestion.insertValue} `;
+	newTaskTitle.value = before + replacement + after;
+
+	isSmartMenuOpen.value = false;
+	activeSmartToken.value = null;
+	smartSuggestions.value = [];
+
+	nextTick(() => {
+		const input = quickAddInputRef.value;
+		if (!input) return;
+		input.focus();
+		const newCursor = before.length + replacement.length;
+		input.setSelectionRange(newCursor, newCursor);
+	});
+}
+
+function handleQuickAddKeydown(e: KeyboardEvent) {
+	if (!isSmartMenuOpen.value || smartSuggestions.value.length === 0) {
+		return;
+	}
+
+	if (e.key === "ArrowDown") {
+		e.preventDefault();
+		selectedSmartIndex.value =
+			(selectedSmartIndex.value + 1) % smartSuggestions.value.length;
+		return;
+	}
+
+	if (e.key === "ArrowUp") {
+		e.preventDefault();
+		selectedSmartIndex.value =
+			(selectedSmartIndex.value - 1 + smartSuggestions.value.length) %
+			smartSuggestions.value.length;
+		return;
+	}
+
+	if (e.key === "Enter" || e.key === "Tab") {
+		const item = smartSuggestions.value[selectedSmartIndex.value];
+		if (item) {
+			e.preventDefault();
+			selectSmartSuggestion(item);
+		}
+		return;
+	}
+
+	if (e.key === "Escape") {
+		e.preventDefault();
+		isSmartMenuOpen.value = false;
+	}
+}
+
+function appendSmartPrefix(prefix: string) {
+	const input = quickAddInputRef.value;
+	const current = newTaskTitle.value;
+	const needsSpace = current.length > 0 && !current.endsWith(" ");
+	newTaskTitle.value = `${current}${needsSpace ? " " : ""}${prefix}`;
+	nextTick(() => {
+		if (!input) return;
+		input.focus();
+		updateSmartDropdown();
+	});
+}
 
 const activeList = computed(() => listStore.activeList);
 const isView = computed(() => listStore.activeView !== null);
@@ -86,7 +211,10 @@ const visibleTasks = computed(() => {
 			: taskStore.incompleteTasks;
 
 	// Subtasks belong in parent detail panes, not top-level center-pane list rows
-	return tasks.filter((t) => !t.parent_id);
+	const rootTasks = tasks.filter((t) => !t.parent_id);
+
+	// Tasks that are checked off should auto get sorted to the bottom
+	return [...rootTasks].sort((a, b) => compareByCompletion(a, b));
 });
 
 // ---------------------------------------------------------------------------
@@ -172,10 +300,98 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
 			target.tagName === "SELECT" ||
 			target.isContentEditable);
 
+	const isMod = e.metaKey || e.ctrlKey;
+
+	// Global combinations (work even if typing in some cases, but especially outside or inside)
+	// Cmd/Ctrl + Shift + P -> Open Command Palette (Control Panel)
+	if (isMod && e.shiftKey && (e.key === "P" || e.key === "p")) {
+		e.preventDefault();
+		uiStore.toggleCommandPalette(undefined, "commands");
+		return;
+	}
+
+	// Cmd/Ctrl + P -> Open List / View Picker
+	if (isMod && !e.shiftKey && !e.altKey && (e.key === "p" || e.key === "P")) {
+		e.preventDefault();
+		uiStore.toggleCommandPalette(undefined, "lists");
+		return;
+	}
+
+	// Cmd/Ctrl + B -> Toggle primary sidebar (VS Code / Zed convention)
+	if (isMod && !e.shiftKey && !e.altKey && (e.key === "b" || e.key === "B")) {
+		e.preventDefault();
+		uiStore.toggleSidebar();
+		return;
+	}
+
+	// Cmd/Ctrl + J -> Toggle detail panel (VS Code / Zed convention for bottom/side panel)
+	if (isMod && !e.shiftKey && !e.altKey && (e.key === "j" || e.key === "J")) {
+		e.preventDefault();
+		uiStore.toggleDetail();
+		return;
+	}
+
+	// Cmd/Ctrl + H -> Toggle show/hide completed tasks
+	if (isMod && !e.shiftKey && !e.altKey && (e.key === "h" || e.key === "H")) {
+		e.preventDefault();
+		const next = !taskStore.includeCompleted;
+		taskStore.setIncludeCompleted(next);
+		filterStore.setIncludeCompleted(next);
+		return;
+	}
+
+	// Escape -> close menus / modals or escape focus (blur active element)
+	if (e.key === "Escape") {
+		if (contextMenu.value.visible) {
+			e.preventDefault();
+			closeContextMenu();
+			return;
+		}
+		if (activeDropdown.value) {
+			e.preventDefault();
+			closeDropdowns();
+			return;
+		}
+		if (isSmartMenuOpen.value) {
+			e.preventDefault();
+			isSmartMenuOpen.value = false;
+			return;
+		}
+		if (uiStore.isCommandPaletteOpen) {
+			e.preventDefault();
+			uiStore.toggleCommandPalette(false);
+			return;
+		}
+		if (uiStore.isShortcutsOpen) {
+			e.preventDefault();
+			uiStore.toggleShortcuts(false);
+			return;
+		}
+		if (uiStore.isImportOpen) {
+			e.preventDefault();
+			uiStore.toggleImport(false);
+			return;
+		}
+
+		const active = (document.activeElement as HTMLElement | null) || target;
+		if (
+			active &&
+			active !== document.body &&
+			typeof active.blur === "function"
+		) {
+			e.preventDefault();
+			active.blur();
+			return;
+		}
+	}
+
 	// Shortcuts when NOT typing in an input
 	if (!isEditingInput) {
-		// '/' -> focus global search bar
-		if (e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+		// '/' or Cmd/Ctrl + F -> focus global search bar
+		if (
+			(e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey) ||
+			(isMod && !e.shiftKey && (e.key === "f" || e.key === "F"))
+		) {
 			e.preventDefault();
 			const searchInput = document.querySelector<HTMLInputElement>(
 				"input[data-global-search]",
@@ -299,6 +515,21 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
 				.catch((err) => {
 					console.error("Failed to update priority via shortcut:", err);
 				});
+			return;
+		}
+
+		// Delete / Backspace or '#' / 'd' -> delete selected task
+		if (
+			((e.key === "Backspace" || e.key === "Delete") && !e.altKey) ||
+			(e.key === "#" && !e.ctrlKey && !e.metaKey && !e.altKey) ||
+			(e.key === "d" && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey)
+		) {
+			const currentId = taskStore.activeTaskId;
+			if (!currentId) return;
+			e.preventDefault();
+			void taskStore.deleteTask(currentId).catch((err) => {
+				console.error("Failed to delete task via shortcut:", err);
+			});
 			return;
 		}
 
@@ -636,20 +867,43 @@ function getListName(listId: string): string {
 }
 
 async function handleAddTask() {
-	const title = newTaskTitle.value.trim();
-	if (!title) return;
+	const rawInput = newTaskTitle.value.trim();
+	if (!rawInput) return;
 
-	let due: string | null = null;
-	if (listStore.activeView === "today") {
-		due = getTodayDateStr();
-	} else if (listStore.activeView === "tomorrow") {
-		due = getTomorrowDateStr();
-	} else if (listStore.activeView === "this_week") {
-		due = getTodayDateStr();
+	// Close smart dropdown if open
+	isSmartMenuOpen.value = false;
+
+	const knownListNames = listStore.lists.map((l) => l.name);
+	const parsed = parseSmartAdd(rawInput, knownListNames);
+	const title = parsed.title || rawInput;
+
+	let due: string | null = parsed.due ?? null;
+	if (!due) {
+		if (listStore.activeView === "today") {
+			due = getTodayDateStr();
+		} else if (listStore.activeView === "tomorrow") {
+			due = getTomorrowDateStr();
+		} else if (listStore.activeView === "this_week") {
+			due = getTodayDateStr();
+		}
 	}
 
-	const targetListId =
-		activeList.value?.id ?? listStore.inboxList?.id ?? listStore.lists[0]?.id;
+	// Determine target list:
+	// 1. If parsed listName matches a list, prioritize that
+	// 2. Otherwise activeList -> inboxList -> first list
+	let targetListId: string | undefined;
+	if (parsed.listName) {
+		const matchedList = listStore.lists.find(
+			(l) => l.name.toLowerCase() === parsed.listName?.toLowerCase(),
+		);
+		if (matchedList) {
+			targetListId = matchedList.id;
+		}
+	}
+	if (!targetListId) {
+		targetListId =
+			activeList.value?.id ?? listStore.inboxList?.id ?? listStore.lists[0]?.id;
+	}
 	if (!targetListId) return;
 
 	try {
@@ -658,17 +912,31 @@ async function handleAddTask() {
 			title,
 			list_id: targetListId,
 			due,
+			priority: parsed.priority ?? null,
 		});
+
+		// Tags to assign: from current filterStore (if any) + any parsed tags
+		const tagsToAssign = new Set<string>();
 		if (filterStore.selectedTag) {
-			try {
-				await assignTag(created.id, filterStore.selectedTag);
-				// Also attach tag locally so immediate filtering reflects it
-				(created as { tags?: unknown }).tags = [filterStore.selectedTag];
-				await taskStore.fetchAllTasks();
-			} catch (tagErr) {
-				console.error("Failed to assign tag to created task:", tagErr);
-			}
+			tagsToAssign.add(filterStore.selectedTag);
 		}
+		for (const tag of parsed.tags) {
+			tagsToAssign.add(tag);
+		}
+
+		if (tagsToAssign.size > 0) {
+			for (const tag of tagsToAssign) {
+				try {
+					await assignTag(created.id, tag);
+				} catch (tagErr) {
+					console.error(`Failed to assign tag ${tag} to created task:`, tagErr);
+				}
+			}
+			(created as { tags?: unknown }).tags = Array.from(tagsToAssign);
+			await taskStore.fetchAllTasks();
+			await tagStore.fetchTags();
+		}
+
 		newTaskTitle.value = "";
 		taskStore.setActiveTask(created.id);
 	} catch (err) {
@@ -799,7 +1067,7 @@ function formatDue(dateStr: string | null): string {
         <button
           v-if="hasActiveSelection"
           type="button"
-          @click="taskStore.setIncludeCompleted(!taskStore.includeCompleted)"
+          @click="() => { const next = !taskStore.includeCompleted; taskStore.setIncludeCompleted(next); filterStore.setIncludeCompleted(next); }"
           class="flex items-center gap-1 text-xs px-2 sm:px-2.5 py-1 rounded-md border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-600 dark:text-zinc-300 cursor-pointer"
           :title="taskStore.includeCompleted ? 'Hide completed tasks' : 'Show completed tasks'"
         >
@@ -1115,14 +1383,17 @@ function formatDue(dateStr: string | null): string {
       </div>
     </div>
 
-    <!-- Quick Add Input -->
-    <div v-if="hasActiveSelection" class="p-3 border-b border-zinc-100 dark:border-zinc-800/60 bg-zinc-50/50 dark:bg-zinc-900/50">
+    <!-- Quick Add Input & Smart Add Dropdown -->
+    <div v-if="hasActiveSelection" class="p-3 border-b border-zinc-100 dark:border-zinc-800/60 bg-zinc-50/50 dark:bg-zinc-900/50 relative">
       <form @submit.prevent="handleAddTask" class="relative flex items-center">
         <input
           ref="quickAddInputRef"
           v-model="newTaskTitle"
-
+          @input="updateSmartDropdown"
+          @click="updateSmartDropdown"
+          @keydown="handleQuickAddKeydown"
           type="text"
+          data-quick-add-input
           :placeholder="quickAddPlaceholder"
           :disabled="isAdding"
           class="w-full pl-3 pr-10 py-2 text-sm rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-hidden focus:ring-1 focus:ring-emerald-500 shadow-2xs"
@@ -1136,6 +1407,102 @@ function formatDue(dateStr: string | null): string {
           <CornerDownLeft class="w-4 h-4" />
         </button>
       </form>
+
+      <!-- Smart Add Suggestions Dropdown -->
+      <div
+        v-if="isSmartMenuOpen && smartSuggestions.length > 0"
+        class="absolute left-3 right-3 top-full mt-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-xl z-40 max-h-60 overflow-y-auto py-1 animate-in fade-in zoom-in-95 duration-100"
+      >
+        <div class="px-2 py-1 text-[11px] font-semibold text-zinc-400 uppercase tracking-wider flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800">
+          <span v-if="activeSmartToken?.prefix === '#'">Tags & Lists (#)</span>
+          <span v-else-if="activeSmartToken?.prefix === '^'">Due Dates (^)</span>
+          <span v-else-if="activeSmartToken?.prefix === '!'">Priority (!)</span>
+          <span class="text-[10px] font-normal normal-case text-zinc-400">↑↓ to navigate, Enter or Tab to pick</span>
+        </div>
+        <div class="p-1 space-y-0.5">
+          <button
+            v-for="(item, idx) in smartSuggestions"
+            :key="item.label + idx"
+            type="button"
+            @mousedown.prevent="selectSmartSuggestion(item)"
+            :class="[
+              'w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs text-left cursor-pointer transition-colors',
+              idx === selectedSmartIndex
+                ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-200 font-medium'
+                : 'hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300',
+            ]"
+          >
+            <div class="flex items-center gap-2 min-w-0">
+              <!-- Icon for suggestion type -->
+              <TagIcon
+                v-if="item.type === 'tag'"
+                class="w-3.5 h-3.5 text-purple-500 shrink-0"
+              />
+              <FolderInput
+                v-else-if="item.type === 'list'"
+                class="w-3.5 h-3.5 text-emerald-500 shrink-0"
+              />
+              <Calendar
+                v-else-if="item.type === 'due'"
+                class="w-3.5 h-3.5 text-blue-500 shrink-0"
+              />
+              <Flag
+                v-else-if="item.type === 'priority'"
+                :class="[
+                  'w-3.5 h-3.5 shrink-0',
+                  item.insertValue === '1' ? 'text-red-500' :
+                  item.insertValue === '2' ? 'text-amber-500' :
+                  item.insertValue === '3' ? 'text-blue-500' : 'text-zinc-400'
+                ]"
+              />
+              <span class="truncate">{{ item.label }}</span>
+              <span
+                v-if="item.description"
+                class="text-[10px] text-zinc-400 truncate"
+              >
+                {{ item.description }}
+              </span>
+            </div>
+            <span
+              v-if="item.badge"
+              class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 shrink-0 ml-2"
+            >
+              {{ item.badge }}
+            </span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Quick Shortcut Hints Toolbar below input -->
+      <div class="flex items-center gap-2 mt-1.5 text-[11px] text-zinc-400 dark:text-zinc-500 select-none">
+        <span class="text-[10px] uppercase font-semibold tracking-wider text-zinc-400/80">Shortcuts:</span>
+        <button
+          type="button"
+          @click="appendSmartPrefix('#')"
+          class="hover:text-purple-600 dark:hover:text-purple-400 font-mono flex items-center gap-0.5 cursor-pointer"
+          title="Add tag or list"
+        >
+          <span class="font-bold">#</span>tag
+        </button>
+        <span>•</span>
+        <button
+          type="button"
+          @click="appendSmartPrefix('^')"
+          class="hover:text-blue-600 dark:hover:text-blue-400 font-mono flex items-center gap-0.5 cursor-pointer"
+          title="Add due date"
+        >
+          <span class="font-bold">^</span>due
+        </button>
+        <span>•</span>
+        <button
+          type="button"
+          @click="appendSmartPrefix('!')"
+          class="hover:text-red-600 dark:hover:text-red-400 font-mono flex items-center gap-0.5 cursor-pointer"
+          title="Set priority (1, 2, 3)"
+        >
+          <span class="font-bold">!</span>priority
+        </button>
+      </div>
     </div>
 
     <!-- Tasks List Container -->

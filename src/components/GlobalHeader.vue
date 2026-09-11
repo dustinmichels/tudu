@@ -1,22 +1,25 @@
 <script setup lang="ts">
 import {
 	CheckCircle2,
+	Circle,
 	Cloud,
 	CloudAlert,
 	CloudOff,
+	Command as CommandIcon,
 	FileUp,
 	Keyboard as KeyboardIcon,
 	Menu as MenuIcon,
-	RefreshCw,
 	Search,
 	Settings,
 	X,
 } from "lucide-vue-next";
 import { computed, onMounted, ref } from "vue";
 import { useFilterStore } from "../stores/filters.ts";
+import { useTaskStore } from "../stores/tasks.ts";
 import { useUIStore } from "../stores/ui.ts";
 
 const filterStore = useFilterStore();
+const taskStore = useTaskStore();
 const uiStore = useUIStore();
 
 const searchInputRef = ref<HTMLInputElement | null>(null);
@@ -28,16 +31,24 @@ function toggleMenu() {
 	isMenuOpen.value = !isMenuOpen.value;
 }
 
+function handleToggleCompleted() {
+	const next = !taskStore.includeCompleted;
+	taskStore.setIncludeCompleted(next);
+	filterStore.setIncludeCompleted(next);
+}
 function handleOpenImport() {
 	isMenuOpen.value = false;
 	uiStore.toggleImport(true);
+}
+function handleOpenCommandPalette() {
+	isMenuOpen.value = false;
+	uiStore.openCommandPalette("commands");
 }
 
 function handleOpenShortcuts() {
 	isMenuOpen.value = false;
 	uiStore.toggleShortcuts(true);
 }
-
 function handleDocumentClick(e: MouseEvent) {
 	const target = e.target as HTMLElement | null;
 	if (target && !target.closest("[data-header-menu-container]")) {
@@ -88,17 +99,12 @@ function handleTriggerSync() {
     data-tauri-drag-region
     class="h-12 w-full shrink-0 select-none flex items-center justify-between px-3 sm:px-4 bg-zinc-100 dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 text-zinc-800 dark:text-zinc-200 z-30"
   >
-    <!-- Left Section: Window traffic light spacer for macOS & Branding -->
+    <!-- Left Section: Window traffic light spacer for macOS -->
     <div
       data-tauri-drag-region
-      class="flex items-center gap-3 shrink-0"
-      :class="{ 'pl-16 sm:pl-18': isMac }"
-    >
-      <div class="flex items-center gap-2 font-bold text-base tracking-tight select-none">
-        <CheckCircle2 class="w-5 h-5 text-emerald-500 shrink-0" />
-        <span class="hidden sm:inline font-semibold">TuDu</span>
-      </div>
-    </div>
+      class="flex items-center shrink-0"
+      :class="{ 'w-16 sm:w-18': isMac }"
+    />
 
     <!-- Center Section: Global Search Bar -->
     <div
@@ -136,6 +142,25 @@ function handleTriggerSync() {
       data-tauri-drag-region
       class="flex items-center gap-1.5 sm:gap-2 shrink-0"
     >
+      <!-- Global Toggle: Show / Hide Completed Tasks -->
+      <button
+        type="button"
+        @click="handleToggleCompleted"
+        :title="taskStore.includeCompleted ? 'Hide completed tasks' : 'Show completed tasks'"
+        class="flex items-center gap-1.5 px-2 py-1 text-xs rounded-md font-medium border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer"
+        data-toggle-completed-button
+      >
+        <CheckCircle2
+          v-if="taskStore.includeCompleted"
+          class="w-3.5 h-3.5 text-emerald-500"
+        />
+        <Circle
+          v-else
+          class="w-3.5 h-3.5 text-zinc-400"
+        />
+        <span class="hidden sm:inline">{{ taskStore.includeCompleted ? 'Completed shown' : 'Completed hidden' }}</span>
+      </button>
+
       <!-- App Menu Button > Import -->
       <div class="relative" data-header-menu-container>
         <button
@@ -154,6 +179,18 @@ function handleTriggerSync() {
           v-if="isMenuOpen"
           class="absolute right-0 top-full mt-1 w-44 py-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md shadow-lg z-50 text-xs text-zinc-800 dark:text-zinc-200"
         >
+          <button
+            type="button"
+            @click="handleOpenCommandPalette"
+            class="w-full px-3 py-2 text-left flex items-center justify-between hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+            data-menu-commands-button
+          >
+            <div class="flex items-center gap-2">
+              <CommandIcon class="w-4 h-4 text-emerald-500" />
+              <span>Command Palette...</span>
+            </div>
+            <kbd class="text-[10px] text-zinc-400 font-mono">⌘⇧P</kbd>
+          </button>
           <button
             type="button"
             @click="handleOpenImport"

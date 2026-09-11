@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
 	AlertCircle,
+	Bike,
 	Calendar,
 	CalendarRange,
 	CheckCircle2,
@@ -418,6 +419,12 @@ async function handleDeleteList(event: MouseEvent, id: string) {
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- Bottom Attribution -->
+    <div class="px-3.5 py-2.5 border-t border-zinc-200 dark:border-zinc-800 text-xs text-zinc-400 dark:text-zinc-500 flex items-center gap-1.5">
+      <Bike class="w-3.5 h-3.5 shrink-0" />
+      <span>by Dustin Michels</span>
     </div>
   </aside>
 </template>

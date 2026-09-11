@@ -15,6 +15,7 @@ import { useFilterStore } from "../src/stores/filters.ts";
 import { useListStore } from "../src/stores/lists.ts";
 import { useTaskStore } from "../src/stores/tasks.ts";
 import {
+	compareByCompletion,
 	compareByDueDate,
 	compareByManual,
 	compareByPriority,
@@ -427,6 +428,16 @@ describe("Phase 3: Sorting Utilities", () => {
 			"p3-pending",
 			"p1-done",
 		]);
+	});
+
+	test("compareByCompletion sorts incomplete tasks before completed tasks", () => {
+		const t1 = makeTask({ id: "t1", completed: false });
+		const t2 = makeTask({ id: "t2", completed: true });
+		const t3 = makeTask({ id: "t3", completed: false });
+		const t4 = makeTask({ id: "t4", completed: true });
+
+		const sorted = [t2, t1, t4, t3].sort(compareByCompletion);
+		expect(sorted.map((t) => t.id)).toEqual(["t1", "t3", "t2", "t4"]);
 	});
 });
 
