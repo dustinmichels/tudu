@@ -15,7 +15,8 @@ export type DefaultView =
 	| "this_week"
 	| "all"
 	| "trash"
-	| "calendar";
+	| "calendar"
+	| "overdue";
 
 export const useListStore = defineStore("lists", () => {
 	const lists = ref<List[]>([]);
@@ -85,11 +86,15 @@ export const useListStore = defineStore("lists", () => {
 		activeView.value = null;
 	}
 
-	async function createList(name: string, color?: string | null): Promise<List> {
+	async function createList(
+		name: string,
+		color?: string | null,
+		icon?: string | null,
+	): Promise<List> {
 		loading.value = true;
 		error.value = null;
 		try {
-			const created = await apiCreateList(name, color);
+			const created = await apiCreateList(name, color, icon);
 			lists.value.push(created);
 			activeView.value = null;
 			activeListId.value = created.id;
@@ -106,6 +111,7 @@ export const useListStore = defineStore("lists", () => {
 		id: string;
 		name?: string;
 		color?: string | null;
+		icon?: string | null;
 		position?: number;
 	}): Promise<List> {
 		loading.value = true;

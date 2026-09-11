@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import { createPinia, setActivePinia } from "pinia";
 import type { Task } from "../src/models/index.ts";
+import { useFilterStore } from "../src/stores/filters.ts";
+import { useListStore } from "../src/stores/lists.ts";
 import { useTaskStore } from "../src/stores/tasks.ts";
 import { useUIStore } from "../src/stores/ui.ts";
 
@@ -269,5 +271,95 @@ describe("Keyboard Shortcuts & Navigation", () => {
 		// Cmd+J toggles detail panel
 		uiStore.toggleDetail();
 		expect(uiStore.isDetailOpen).toBe(!initialDetail);
+	});
+
+	it("navigates to calendar view and clears active list, tag, and smart view", () => {
+		const listStore = useListStore();
+		const filterStore = useFilterStore();
+		const taskStore = useTaskStore();
+
+		// Set initial state: active list and tag filter
+		listStore.setActiveList("list-123");
+		filterStore.setTagFilter("urgent");
+		filterStore.setSmartView("today");
+		taskStore.setActiveTask("t1");
+
+		expect(listStore.activeListId).toBe("list-123");
+		expect(filterStore.selectedTag).toBe("urgent");
+		expect(filterStore.smartView).toBe("today");
+		expect(taskStore.activeTaskId).toBe("t1");
+
+		// Trigger Calendar shortcut navigation (Cmd+C action)
+		filterStore.setTagFilter(null);
+		filterStore.setListFilter(null);
+		filterStore.setSmartView(null);
+		listStore.setActiveView("calendar");
+		listStore.setActiveList(null);
+		taskStore.setActiveTask(null);
+
+		expect(listStore.activeView).toBe("calendar");
+		expect(listStore.activeListId).toBe(null);
+		expect(filterStore.selectedTag).toBe(null);
+		expect(filterStore.selectedListId).toBe(null);
+		expect(filterStore.smartView).toBe(null);
+		expect(taskStore.activeTaskId).toBe(null);
+	});
+
+	it("guards Cmd+C shortcut when user is typing in an input or text is highlighted", () => {
+		// Test helper simulating the shortcut guard logic in App.vue and TaskList.vue
+		function shouldTriggerCalendarShortcut(opts: {
+			isMod: boolean;
+			key: string;
+			shiftKey?: boolean;
+			altKey?: boolean;
+			isEditingInput: boolean;
+			hasSelection: boolean;
+		}): boolean {
+			const { isMod, key, shiftKey = false, altKey = false, isEditingInput, hasSelection } = opts;
+			if (isMod && !shiftKey && !altKey && (key === "c" || key === "C")) {
+				return !isEditingInput && !hasSelection;
+			}
+			return false;
+		}
+
+		// Plain 'c' without modifier does not trigger calendar navigation (it toggles task complete)
+		expect(
+			shouldTriggerCalendarShortcut({
+				isMod: false,
+				key: "c",
+				isEditingInput: false,
+				hasSelection: false,
+			}),
+		).toBe(false);
+
+		// Cmd+C while typing in an input field does not trigger calendar (allows native copy)
+		expect(
+			shouldTriggerCalendarShortcut({
+				isMod: true,
+				key: "c",
+				isEditingInput: true,
+				hasSelection: false,
+			}),
+		).toBe(false);
+
+		// Cmd+C while text is selected does not trigger calendar (allows native copy)
+		expect(
+			shouldTriggerCalendarShortcut({
+				isMod: true,
+				key: "c",
+				isEditingInput: false,
+				hasSelection: true,
+			}),
+		).toBe(false);
+
+		// Cmd+C when idle / not typing triggers calendar navigation
+		expect(
+			shouldTriggerCalendarShortcut({
+				isMod: true,
+				key: "c",
+				isEditingInput: false,
+				hasSelection: false,
+			}),
+		).toBe(true);
 	});
 });

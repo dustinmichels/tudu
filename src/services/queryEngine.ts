@@ -1,7 +1,7 @@
 import type { Task } from "../models/index.ts";
 import { type SortOptions, sortTasks } from "../utils/sorting.ts";
 
-export type SmartView = "inbox" | "today" | "tomorrow" | "this_week" | "all" | "trash";
+export type SmartView = "inbox" | "today" | "tomorrow" | "this_week" | "all" | "trash" | "overdue";
 
 export type CompletionFilter = "all" | "incomplete" | "completed";
 
@@ -128,6 +128,9 @@ export function matchesSmartView(
 
 		case "this_week":
 			return isThisWeek(task.due, now);
+
+		case "overdue":
+			return !task.completed && isOverdue(task.due, now);
 
 		case "all":
 			return true;
@@ -260,6 +263,7 @@ export function getSmartListCounts(
 		this_week: { total: 0, incomplete: 0 },
 		all: { total: 0, incomplete: 0 },
 		trash: { total: 0, incomplete: 0 },
+		overdue: { total: 0, incomplete: 0 },
 	};
 
 	for (const task of tasks) {
@@ -291,6 +295,11 @@ export function getSmartListCounts(
 		if (matchesSmartView(task, "this_week", context)) {
 			counts.this_week.total++;
 			if (!task.completed) counts.this_week.incomplete++;
+		}
+
+		if (matchesSmartView(task, "overdue", context)) {
+			counts.overdue.total++;
+			if (!task.completed) counts.overdue.incomplete++;
 		}
 	}
 

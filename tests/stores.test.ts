@@ -65,7 +65,15 @@ describe("API Service", () => {
 		const result = await api.lists.create("Work");
 		expect(result).toEqual(newList);
 		expect(invokeCalls[0]?.command).toBe("create_list");
-		expect(invokeCalls[0]?.args).toEqual({ name: "Work", color: null });
+		expect(invokeCalls[0]?.args).toEqual({ name: "Work", color: null, icon: null });
+
+		await api.lists.create("Shopping", "#123456", "ShoppingCart");
+		expect(invokeCalls[1]?.command).toBe("create_list");
+		expect(invokeCalls[1]?.args).toEqual({
+			name: "Shopping",
+			color: "#123456",
+			icon: "ShoppingCart",
+		});
 	});
 
 	test("throws ApiError on invoke failure", async () => {
@@ -222,6 +230,11 @@ describe("Pinia List Store (useListStore)", () => {
 		await store.fetchLists();
 
 		expect(store.lists).toEqual(sampleLists);
+		expect(store.activeListId).toBeNull();
+
+		// Repair stale activeListId to Inbox
+		store.activeListId = "stale-id";
+		await store.fetchLists();
 		expect(store.activeListId).toBe("l1");
 		expect(store.activeList?.name).toBe("Inbox");
 	});

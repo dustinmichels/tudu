@@ -16,6 +16,7 @@ import {
 	Tag as TagIcon,
 	Trash2,
 	X,
+	Zap,
 } from "lucide-vue-next";
 import { computed, ref } from "vue";
 import { useFilterStore } from "../stores/filters.ts";
@@ -23,6 +24,8 @@ import { type DefaultView, useListStore } from "../stores/lists.ts";
 import { useTagStore } from "../stores/tags.ts";
 import { useTaskStore } from "../stores/tasks.ts";
 import { useUIStore } from "../stores/ui.ts";
+import { DEFAULT_LIST_ICON, getListIcon } from "../utils/icons.ts";
+import IconPickerPopover from "./IconPickerPopover.vue";
 
 const listStore = useListStore();
 const taskStore = useTaskStore();
@@ -32,7 +35,15 @@ const uiStore = useUIStore();
 
 // Inline list creation state
 const newListName = ref("");
+const newListIcon = ref(DEFAULT_LIST_ICON);
 const isCreating = ref(false);
+
+// Icon picker popover state
+const isIconPickerOpen = ref(false);
+const iconPickerTargetRect = ref<DOMRect | null>(null);
+const iconPickerTargetListId = ref<string | null>(null);
+const isNewListIconPicker = ref(false);
+const iconPickerTitle = ref("Choose List Icon");
 
 // Inline list renaming state
 const editingListId = ref<string | null>(null);
@@ -81,6 +92,13 @@ const smartViews = computed(() => [
 		count: taskStore.countThisWeek,
 	},
 	{
+		id: "overdue" as DefaultView,
+		name: "Overdue",
+		icon: AlertCircle,
+		iconColor: "text-red-500",
+		count: taskStore.countOverdue,
+	},
+	{
 		id: "calendar" as DefaultView,
 		name: "Calendar",
 		icon: CalendarDays,
@@ -100,15 +118,6 @@ function handleCloseMobileSidebar() {
 	if (uiStore.isSidebarOpen) {
 		uiStore.toggleSidebar(false);
 	}
-}
-
-function handleGoHome() {
-	filterStore.setTagFilter(null);
-	filterStore.setListFilter(null);
-	filterStore.setSmartView(null);
-	listStore.goHome();
-	taskStore.setActiveTask(null);
-	handleCloseMobileSidebar();
 }
 
 function handleSelectSmartView(view: DefaultView) {
@@ -140,14 +149,47 @@ function handleSelectTag(tagName: string) {
 	taskStore.setActiveTask(null);
 	handleCloseMobileSidebar();
 }
+function openListIconPicker(event: MouseEvent, list: { id: string; icon?: string | null }) {
+	event.stopPropagation();
+	const el = event.currentTarget as HTMLElement;
+	iconPickerTargetRect.value = el.getBoundingClientRect();
+	iconPickerTargetListId.value = list.id;
+	isNewListIconPicker.value = false;
+	iconPickerTitle.value = "Choose List Icon";
+	isIconPickerOpen.value = true;
+}
+
+function openNewListIconPicker(event: MouseEvent) {
+	event.stopPropagation();
+	const el = event.currentTarget as HTMLElement;
+	iconPickerTargetRect.value = el.getBoundingClientRect();
+	iconPickerTargetListId.value = null;
+	isNewListIconPicker.value = true;
+	iconPickerTitle.value = "Choose List Icon";
+	isIconPickerOpen.value = true;
+}
+
+async function handleIconSelected(iconName: string) {
+	if (isNewListIconPicker.value) {
+		newListIcon.value = iconName;
+	} else if (iconPickerTargetListId.value) {
+		try {
+			await listStore.updateList({ id: iconPickerTargetListId.value, icon: iconName });
+		} catch (err) {
+			console.error("Failed to update list icon:", err);
+		}
+	}
+}
+
 async function handleCreateList() {
 	const name = newListName.value.trim();
 	if (!name) return;
 
 	try {
 		isCreating.value = true;
-		const created = await listStore.createList(name);
+		const created = await listStore.createList(name, null, newListIcon.value);
 		newListName.value = "";
+		newListIcon.value = DEFAULT_LIST_ICON;
 		filterStore.setTagFilter(null);
 		filterStore.setSmartView(null);
 		listStore.setActiveView(null);
@@ -226,19 +268,17 @@ async function handleDeleteList(event: MouseEvent, id: string) {
 
 		<!-- Scrollable Navigation Sections -->
 		<div class="flex-1 overflow-y-auto p-2 space-y-4 text-sm">
-			<!-- Home (Capture) -->
+			<!-- Quick Add -->
 			<button
 				type="button"
-				@click="handleGoHome"
-				class="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer text-left"
-				:class="[
-					!listStore.activeListId && !listStore.activeView && !filterStore.selectedTag
-						? 'bg-emerald-100/70 text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200'
-						: 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900',
-				]"
+				@click="uiStore.toggleCapture(true)"
+				class="w-full flex items-center justify-between gap-2.5 px-2.5 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer text-left text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900"
 			>
-				<Home class="w-4 h-4 shrink-0 text-emerald-500" />
-				<span>Home</span>
+				<div class="flex items-center gap-2.5">
+					<Zap class="w-4 h-4 shrink-0 text-emerald-500" />
+					<span>Quick Add</span>
+				</div>
+				<kbd class="text-[10px] font-mono text-zinc-400 dark:text-zinc-500 shrink-0">⌘N</kbd>
 			</button>
 
 			<!-- 1. Smart Views Section -->
@@ -258,6 +298,7 @@ async function handleDeleteList(event: MouseEvent, id: string) {
 						:key="view.id"
 						type="button"
 						@click="handleSelectSmartView(view.id)"
+						:title="view.id === 'calendar' ? 'Calendar (⌘C)' : view.name"
 						class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer text-left"
 						:class="[
 							listStore.activeView === view.id && !filterStore.selectedTag
@@ -270,18 +311,26 @@ async function handleDeleteList(event: MouseEvent, id: string) {
 							<span class="truncate">{{ view.name }}</span>
 						</div>
 
-						<!-- Incomplete task badge -->
-						<span
-							v-if="view.count > 0"
-							class="text-xs font-semibold px-1.5 py-0.2 rounded-full"
-							:class="[
-								listStore.activeView === view.id && !filterStore.selectedTag
-									? 'bg-emerald-200 text-emerald-900 dark:bg-emerald-900 dark:text-emerald-100'
-									: 'bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400',
-							]"
-						>
-							{{ view.count }}
-						</span>
+						<div class="flex items-center gap-1.5 shrink-0">
+							<kbd
+								v-if="view.id === 'calendar'"
+								class="text-[10px] font-mono text-zinc-400 dark:text-zinc-500"
+							>
+								⌘C
+							</kbd>
+							<!-- Incomplete task badge -->
+							<span
+								v-if="view.count > 0"
+								class="text-xs font-semibold px-1.5 py-0.2 rounded-full"
+								:class="[
+									listStore.activeView === view.id && !filterStore.selectedTag
+										? 'bg-emerald-200 text-emerald-900 dark:bg-emerald-900 dark:text-emerald-100'
+										: 'bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400',
+								]"
+							>
+								{{ view.count }}
+							</span>
+						</div>
 					</button>
 				</div>
 			</div>
@@ -313,10 +362,27 @@ async function handleDeleteList(event: MouseEvent, id: string) {
 					>
 						<!-- Normal display or inline rename input -->
 						<div class="flex items-center gap-2 min-w-0 flex-1">
-							<span
-								class="w-2.5 h-2.5 rounded-full shrink-0"
-								:style="{ backgroundColor: list.color || '#10b981' }"
-							/>
+							<button
+								type="button"
+								@click="openListIconPicker($event, list)"
+								class="p-0.5 -ml-0.5 rounded-md hover:bg-zinc-200/80 dark:hover:bg-zinc-800 transition-colors shrink-0 cursor-pointer"
+								title="Change icon"
+							>
+								<component
+									:is="getListIcon(list.icon)"
+									class="w-4 h-4 shrink-0 transition-transform group-hover:scale-105"
+									:class="[
+										list.color
+											? ''
+											: listStore.activeListId === list.id &&
+												  !listStore.activeView &&
+												  !filterStore.selectedTag
+												? 'text-emerald-600 dark:text-emerald-400'
+												: 'text-zinc-400 dark:text-zinc-500 group-hover:text-zinc-600 dark:group-hover:text-zinc-300',
+									]"
+									:style="list.color ? { color: list.color } : {}"
+								/>
+							</button>
 
 							<input
 								v-if="editingListId === list.id"
@@ -383,12 +449,23 @@ async function handleDeleteList(event: MouseEvent, id: string) {
 					<!-- Inline Create List Input -->
 					<form @submit.prevent="handleCreateList" class="mt-2 px-1">
 						<div class="relative flex items-center">
+							<button
+								type="button"
+								@click="openNewListIconPicker($event)"
+								class="absolute left-1.5 p-1 rounded-md hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors cursor-pointer"
+								title="Choose icon"
+							>
+								<component
+									:is="getListIcon(newListIcon)"
+									class="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400"
+								/>
+							</button>
 							<input
 								v-model="newListName"
 								type="text"
 								placeholder="New list..."
 								:disabled="isCreating"
-								class="w-full pl-2.5 pr-8 py-1.5 text-xs rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-hidden focus:ring-1 focus:ring-emerald-500"
+								class="w-full pl-8 pr-8 py-1.5 text-xs rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-hidden focus:ring-1 focus:ring-emerald-500"
 							/>
 							<button
 								type="submit"
@@ -463,5 +540,20 @@ async function handleDeleteList(event: MouseEvent, id: string) {
 			<Bike class="w-3.5 h-3.5 shrink-0" />
 			<span>by Dustin Michels</span>
 		</div>
+
+		<!-- Icon Picker Popover -->
+		<IconPickerPopover
+			:is-open="isIconPickerOpen"
+			:selected-icon="
+				isNewListIconPicker
+					? newListIcon
+					: (listStore.customLists.find((l) => l.id === iconPickerTargetListId)?.icon ??
+						DEFAULT_LIST_ICON)
+			"
+			:target-rect="iconPickerTargetRect"
+			:title="iconPickerTitle"
+			@select="handleIconSelected"
+			@close="isIconPickerOpen = false"
+		/>
 	</aside>
 </template>

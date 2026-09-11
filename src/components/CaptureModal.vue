@@ -180,6 +180,15 @@ function getTomorrowDateStr(): string {
 	return `${y}-${m}-${day}`;
 }
 
+function getYesterdayDateStr(): string {
+	const d = new Date();
+	d.setDate(d.getDate() - 1);
+	const y = d.getFullYear();
+	const m = String(d.getMonth() + 1).padStart(2, "0");
+	const day = String(d.getDate()).padStart(2, "0");
+	return `${y}-${m}-${day}`;
+}
+
 async function handleSubmit() {
 	const rawInput = title.value.trim();
 	if (!rawInput) return;
@@ -194,6 +203,7 @@ async function handleSubmit() {
 		if (listStore.activeView === "today") due = getTodayDateStr();
 		else if (listStore.activeView === "tomorrow") due = getTomorrowDateStr();
 		else if (listStore.activeView === "this_week") due = getTodayDateStr();
+		else if (listStore.activeView === "overdue") due = getYesterdayDateStr();
 	}
 
 	let targetListId: string | undefined;
@@ -271,26 +281,45 @@ function handleBackdropClick(e: MouseEvent) {
 				>
 					<div
 						v-if="uiStore.isCaptureOpen"
-						class="w-full max-w-xl bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl border border-zinc-200 dark:border-zinc-800 overflow-visible"
+						class="w-full max-w-xl bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl border border-zinc-200 dark:border-zinc-800 overflow-visible relative"
 					>
 						<!-- Modal header -->
 						<div
-							class="flex items-center justify-between px-5 pt-5 pb-4 border-b border-zinc-100 dark:border-zinc-800"
+							class="flex flex-col items-center px-5 pt-6 pb-4 border-b border-zinc-100 dark:border-zinc-800"
 						>
-							<div class="flex items-center gap-2.5">
-								<div
-									class="w-7 h-7 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 flex items-center justify-center"
-								>
-									<Zap class="w-4 h-4 text-emerald-500" />
-								</div>
-								<span class="text-sm font-semibold text-zinc-700 dark:text-zinc-200"
-									>Quick Capture</span
-								>
+							<div
+								class="w-12 h-12 mx-auto mb-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 flex items-center justify-center shadow-sm"
+							>
+								<Zap class="w-6 h-6 text-emerald-500" />
 							</div>
+							<h2 class="text-lg font-bold text-zinc-800 dark:text-zinc-100 mb-0.5 tracking-tight">
+								Quick Capture
+							</h2>
+							<p class="text-xs text-zinc-400 dark:text-zinc-500 mb-3">
+								Add to inbox instantly. Organize later.
+							</p>
+							<!-- Stats pills -->
+							<div class="flex items-center gap-2 flex-wrap justify-center">
+								<span
+									class="flex items-center gap-1.5 text-xs bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 px-3 py-1 rounded-full"
+								>
+									<Calendar class="w-3 h-3 text-emerald-500 shrink-0" />
+									{{ taskStore.countToday }} due today
+								</span>
+								<span
+									class="flex items-center gap-1.5 text-xs bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 px-3 py-1 rounded-full"
+								>
+									<span
+										class="w-3 h-3 rounded-full border-2 border-blue-400 shrink-0 inline-block"
+									/>
+									{{ taskStore.countAll }} pending
+								</span>
+							</div>
+							<!-- Close button -->
 							<button
 								type="button"
 								@click="close"
-								class="p-1 rounded-md text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+								class="absolute top-3 right-3 p-1 rounded-md text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
 								title="Close (Esc)"
 							>
 								<X class="w-4 h-4" />

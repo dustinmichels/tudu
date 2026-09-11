@@ -34,6 +34,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0003_default_inbox",
         sql: include_str!("../migrations/0003_default_inbox.sql"),
     },
+    Migration {
+        version: 4,
+        name: "0004_list_icon",
+        sql: include_str!("../migrations/0004_list_icon.sql"),
+    },
 ];
 
 pub async fn ensure_default_inbox(conn: &Connection) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {

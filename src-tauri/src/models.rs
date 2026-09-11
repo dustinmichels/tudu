@@ -9,6 +9,8 @@ pub struct List {
     #[serde(default)]
     pub is_archived: bool,
     #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
     pub extra: Option<serde_json::Value>,
     pub created_at: String,
     pub updated_at: String,
@@ -225,6 +227,8 @@ pub struct OpenTaskTaskList {
     pub position: i64,
     #[serde(default)]
     pub is_archived: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub extra: Option<serde_json::Value>,
 }

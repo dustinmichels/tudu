@@ -90,6 +90,7 @@ export const useTaskStore = defineStore("tasks", () => {
 	const countThisWeek = computed(() => smartCounts.value.this_week.incomplete);
 	const countAll = computed(() => smartCounts.value.all.incomplete);
 	const countTrash = computed(() => smartCounts.value.trash.total);
+	const countOverdue = computed(() => smartCounts.value.overdue.incomplete);
 
 	const inboxTasks = computed<Task[]>(() => {
 		const listStore = useListStore();
@@ -107,6 +108,8 @@ export const useTaskStore = defineStore("tasks", () => {
 	const allTasksList = computed<Task[]>(() => querySmartList(allTasks.value, "all"));
 
 	const trashTasks = computed<Task[]>(() => querySmartList(allTasks.value, "trash"));
+
+	const overdueTasks = computed<Task[]>(() => querySmartList(allTasks.value, "overdue"));
 
 	// Reactive filtered tasks based on filterStore
 	const filteredTasks = computed<Task[]>(() => {
@@ -584,10 +587,12 @@ export const useTaskStore = defineStore("tasks", () => {
 		countThisWeek,
 		countAll,
 		countTrash,
+		countOverdue,
 		inboxTasks,
 		todayTasks,
 		tomorrowTasks,
 		thisWeekTasks,
+		overdueTasks,
 		allTasksList,
 		trashTasks,
 		filteredTasks,

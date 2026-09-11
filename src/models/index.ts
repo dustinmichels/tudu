@@ -19,6 +19,7 @@ export interface List {
 	id: string;
 	name: string;
 	color: string | null;
+	icon?: string | null;
 	position: number;
 	is_archived?: boolean;
 	extra?: Record<string, unknown> | null;
@@ -86,6 +87,7 @@ export interface Note {
 export interface CreateListInput {
 	name: string;
 	color?: string | null;
+	icon?: string | null;
 	position?: number;
 	is_archived?: boolean;
 	extra?: Record<string, unknown> | null;
@@ -95,6 +97,7 @@ export interface UpdateListInput {
 	id: string;
 	name?: string;
 	color?: string | null;
+	icon?: string | null;
 	position?: number;
 }
 
@@ -242,6 +245,7 @@ export interface OpenTaskTaskList {
 	id: string;
 	name: string;
 	color?: string | null;
+	icon?: string | null;
 	position?: number;
 	is_archived?: boolean;
 	extra?: Record<string, unknown> | null;

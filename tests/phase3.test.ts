@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from "pinia";
 import type { Task } from "../src/models/index.ts";
 import {
 	getSmartListCounts,
+	isOverdue,
 	isThisWeek,
 	isTodayOrOverdue,
 	isTomorrow,
@@ -149,6 +150,32 @@ describe("Phase 3: Smart List Query Engine", () => {
 		expect(parseDueDateToLocal("invalid-date")).toBeNull();
 	});
 
+	test("isOverdue matches dates strictly before today", () => {
+		expect(isOverdue("2026-09-08", fixedNow)).toBeTrue();
+		expect(isOverdue("2026-09-09", fixedNow)).toBeTrue();
+		expect(isOverdue("2026-09-10", fixedNow)).toBeFalse();
+		expect(isOverdue("2026-09-11", fixedNow)).toBeFalse();
+		expect(isOverdue(null, fixedNow)).toBeFalse();
+	});
+
+	test("Overdue smart list matches incomplete tasks strictly before today", () => {
+		const overdueIncomplete = makeTask({ due: "2026-09-08", completed: false });
+		const overdueCompleted = makeTask({ due: "2026-09-08", completed: true });
+		const todayTask = makeTask({ due: "2026-09-10", completed: false });
+		const futureTask = makeTask({ due: "2026-09-15", completed: false });
+		const deletedOverdue = makeTask({
+			due: "2026-09-08",
+			completed: false,
+			deleted_at: "2026-09-09T00:00:00Z",
+		});
+
+		expect(matchesSmartView(overdueIncomplete, "overdue", { now: fixedNow })).toBeTrue();
+		expect(matchesSmartView(overdueCompleted, "overdue", { now: fixedNow })).toBeFalse();
+		expect(matchesSmartView(todayTask, "overdue", { now: fixedNow })).toBeFalse();
+		expect(matchesSmartView(futureTask, "overdue", { now: fixedNow })).toBeFalse();
+		expect(matchesSmartView(deletedOverdue, "overdue", { now: fixedNow })).toBeFalse();
+	});
+
 	test("Today smart list includes overdue and today tasks", () => {
 		// Overdue
 		expect(isTodayOrOverdue("2026-09-08", fixedNow)).toBeTrue();
@@ -208,11 +235,15 @@ describe("Phase 3: Smart List Query Engine", () => {
 
 	test("querySmartList filters collection by smart view", () => {
 		const tasks: Task[] = [
+			makeTask({ id: "0", list_id: "work-id", due: "2026-09-08", completed: false }), // Overdue
 			makeTask({ id: "1", list_id: "inbox-id", due: "2026-09-10" }), // Inbox, Today, This Week
 			makeTask({ id: "2", list_id: "work-id", due: "2026-09-11" }), // Tomorrow, This Week
 			makeTask({ id: "3", list_id: "work-id", due: "2026-09-25" }), // Future
 			makeTask({ id: "4", deleted_at: "2026-09-01T00:00:00Z" }), // Trash
 		];
+
+		const overdueResults = querySmartList(tasks, "overdue", { now: fixedNow });
+		expect(overdueResults.map((t) => t.id)).toEqual(["0"]);
 
 		const inboxResults = querySmartList(tasks, "inbox", {
 			inboxListId: "inbox-id",
@@ -220,7 +251,7 @@ describe("Phase 3: Smart List Query Engine", () => {
 		expect(inboxResults.map((t) => t.id)).toEqual(["1"]);
 
 		const todayResults = querySmartList(tasks, "today", { now: fixedNow });
-		expect(todayResults.map((t) => t.id)).toEqual(["1"]);
+		expect(todayResults.map((t) => t.id)).toEqual(["0", "1"]);
 
 		const tomorrowResults = querySmartList(tasks, "tomorrow", {
 			now: fixedNow,
@@ -233,7 +264,7 @@ describe("Phase 3: Smart List Query Engine", () => {
 		expect(thisWeekResults.map((t) => t.id)).toEqual(["1", "2"]);
 
 		const allResults = querySmartList(tasks, "all");
-		expect(allResults.map((t) => t.id)).toEqual(["1", "2", "3"]);
+		expect(allResults.map((t) => t.id)).toEqual(["0", "1", "2", "3"]);
 
 		const trashResults = querySmartList(tasks, "trash");
 		expect(trashResults.map((t) => t.id)).toEqual(["4"]);
@@ -264,6 +295,12 @@ describe("Phase 3: Smart List Query Engine", () => {
 				deleted_at: "2026-09-01T00:00:00Z",
 				completed: false,
 			}),
+			makeTask({
+				id: "5",
+				list_id: "work-id",
+				due: "2026-09-08",
+				completed: false,
+			}),
 		];
 
 		const counts = getSmartListCounts(tasks, {
@@ -272,11 +309,12 @@ describe("Phase 3: Smart List Query Engine", () => {
 		});
 
 		expect(counts.inbox).toEqual({ total: 2, incomplete: 1 });
-		expect(counts.today).toEqual({ total: 2, incomplete: 1 });
+		expect(counts.today).toEqual({ total: 3, incomplete: 2 });
 		expect(counts.tomorrow).toEqual({ total: 1, incomplete: 1 });
 		expect(counts.this_week).toEqual({ total: 3, incomplete: 2 });
-		expect(counts.all).toEqual({ total: 3, incomplete: 2 });
+		expect(counts.all).toEqual({ total: 4, incomplete: 3 });
 		expect(counts.trash).toEqual({ total: 1, incomplete: 1 });
+		expect(counts.overdue).toEqual({ total: 1, incomplete: 1 });
 	});
 
 	test("queryTasks combines filters, search query, and sorting", () => {
@@ -453,6 +491,9 @@ describe("Phase 3: Task Store Smart Lists and Reactive Integration", () => {
 		const tomorrowDate = new Date();
 		tomorrowDate.setDate(tomorrowDate.getDate() + 1);
 		const tomorrowStr = tomorrowDate.toISOString().slice(0, 10);
+		const yesterdayDate = new Date();
+		yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+		const yesterdayStr = yesterdayDate.toISOString().slice(0, 10);
 
 		taskStore.allTasks = [
 			makeTask({ id: "t-inbox", list_id: "inbox-1", completed: false }),
@@ -468,18 +509,26 @@ describe("Phase 3: Task Store Smart Lists and Reactive Integration", () => {
 				due: tomorrowStr,
 				completed: false,
 			}),
+			makeTask({
+				id: "t-overdue",
+				list_id: "other",
+				due: yesterdayStr,
+				completed: false,
+			}),
 			makeTask({ id: "t-deleted", deleted_at: "2026-01-01T00:00:00Z" }),
 		];
 
 		expect(taskStore.inboxTasks.length).toBe(2);
-		expect(taskStore.todayTasks.length).toBe(1);
+		expect(taskStore.todayTasks.length).toBe(2);
 		expect(taskStore.tomorrowTasks.length).toBe(1);
-		expect(taskStore.allTasksList.length).toBe(3);
+		expect(taskStore.overdueTasks.length).toBe(1);
+		expect(taskStore.allTasksList.length).toBe(4);
 		expect(taskStore.trashTasks.length).toBe(1);
 
 		expect(taskStore.countInbox).toBe(2);
-		expect(taskStore.countToday).toBe(1);
+		expect(taskStore.countToday).toBe(2);
 		expect(taskStore.countTomorrow).toBe(1);
+		expect(taskStore.countOverdue).toBe(1);
 		expect(taskStore.countTrash).toBe(1);
 	});
 });

@@ -49,6 +49,46 @@ export const useUIStore = defineStore("ui", () => {
 		isCaptureOpen.value = open !== undefined ? open : !isCaptureOpen.value;
 	}
 
+	const showSubtasksInline = ref(false); // Whether subtasks are shown indented under parent tasks in main view
+	const collapsedTaskIds = ref<Set<string>>(new Set()); // Overrides when showSubtasksInline is true
+	const manuallyExpandedTaskIds = ref<Set<string>>(new Set()); // Overrides when showSubtasksInline is false
+
+	function toggleSubtasksInline(show?: boolean) {
+		showSubtasksInline.value = show !== undefined ? show : !showSubtasksInline.value;
+		if (showSubtasksInline.value) {
+			collapsedTaskIds.value = new Set();
+		} else {
+			manuallyExpandedTaskIds.value = new Set();
+		}
+	}
+
+	function isTaskSubtasksExpanded(taskId: string): boolean {
+		if (showSubtasksInline.value) {
+			return !collapsedTaskIds.value.has(taskId);
+		}
+		return manuallyExpandedTaskIds.value.has(taskId);
+	}
+
+	function toggleTaskSubtasks(taskId: string) {
+		if (showSubtasksInline.value) {
+			const next = new Set(collapsedTaskIds.value);
+			if (next.has(taskId)) {
+				next.delete(taskId);
+			} else {
+				next.add(taskId);
+			}
+			collapsedTaskIds.value = next;
+		} else {
+			const next = new Set(manuallyExpandedTaskIds.value);
+			if (next.has(taskId)) {
+				next.delete(taskId);
+			} else {
+				next.add(taskId);
+			}
+			manuallyExpandedTaskIds.value = next;
+		}
+	}
+
 	return {
 		isSidebarOpen,
 		isDetailOpen,
@@ -68,5 +108,9 @@ export const useUIStore = defineStore("ui", () => {
 		isCaptureOpen,
 		toggleCapture,
 		setSyncStatus,
+		showSubtasksInline,
+		toggleSubtasksInline,
+		isTaskSubtasksExpanded,
+		toggleTaskSubtasks,
 	};
 });

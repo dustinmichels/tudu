@@ -52,10 +52,15 @@ export async function getLists(): Promise<List[]> {
 	return safeInvoke<List[]>("get_lists");
 }
 
-export async function createList(name: string, color?: string | null): Promise<List> {
+export async function createList(
+	name: string,
+	color?: string | null,
+	icon?: string | null,
+): Promise<List> {
 	return safeInvoke<List>("create_list", {
 		name,
 		color: color ?? null,
+		icon: icon ?? null,
 	});
 }
 
@@ -65,6 +70,7 @@ export async function updateList(input: UpdateListInput): Promise<List> {
 		name: input.name,
 		color: input.color,
 		position: input.position,
+		icon: input.icon,
 	});
 }
 

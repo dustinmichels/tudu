@@ -38,7 +38,7 @@ import {
 } from "../services/api.ts";
 import { useListStore } from "../stores/lists.ts";
 import { useTagStore } from "../stores/tags.ts";
-import { useTaskStore } from "../stores/tasks.ts";
+import { isOverdue, useTaskStore } from "../stores/tasks.ts";
 import { useUIStore } from "../stores/ui.ts";
 
 const listStore = useListStore();
@@ -901,8 +901,19 @@ function formatDate(dateStr: string | null | undefined): string {
 									type="date"
 									:value="formattedDueDate"
 									@input="(e) => setDueDate((e.target as HTMLInputElement).value || null)"
-									class="text-xs bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded px-2 py-1 text-zinc-800 dark:text-zinc-200 focus:outline-hidden focus:border-zinc-400"
+									class="text-xs bg-white dark:bg-zinc-900 border rounded px-2 py-1 focus:outline-hidden"
+									:class="
+										!task.completed && isOverdue(task.due)
+											? 'border-red-400 dark:border-red-600 text-red-600 dark:text-red-400 font-medium'
+											: 'border-zinc-200 dark:border-zinc-800 text-zinc-800 dark:text-zinc-200 focus:border-zinc-400'
+									"
 								/>
+								<span
+									v-if="!task.completed && isOverdue(task.due)"
+									class="text-[10px] font-semibold text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-950/60 px-1.5 py-0.5 rounded uppercase tracking-wider"
+								>
+									Overdue
+								</span>
 								<button
 									v-if="task.due"
 									type="button"

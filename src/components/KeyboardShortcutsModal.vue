@@ -45,7 +45,8 @@ interface ShortcutCategory {
 const essentialShortcuts: Shortcut[] = [
 	{ keys: ["⌘", "N"], description: "Quick Capture (new task modal)" },
 	{ keys: ["⌘", "Shift", "P"], description: "Open Command Palette" },
-	{ keys: ["t"], description: "Focus quick-add input (home page)" },
+	{ keys: ["⌘", "C"], description: "Go to Calendar view" },
+	{ keys: ["t"], description: "Focus inline add input (current list/view)" },
 	{ keys: ["j", "or", "↓"], description: "Select next task" },
 	{ keys: ["k", "or", "↑"], description: "Select previous task" },
 	{ keys: ["c"], description: "Toggle task complete" },
@@ -76,6 +77,10 @@ const shortcutCategories: ShortcutCategory[] = [
 		title: "View & Layout (Zed / VS Code)",
 		shortcuts: [
 			{
+				keys: ["⌘", "C"],
+				description: "Go to Calendar view",
+			},
+			{
 				keys: ["⌘", "B"],
 				description: "Toggle navigation sidebar",
 			},
@@ -87,11 +92,19 @@ const shortcutCategories: ShortcutCategory[] = [
 				keys: ["⌘", "H"],
 				description: "Toggle show / hide completed tasks",
 			},
+			{
+				keys: ["⌘", "U"],
+				description: "Toggle subtasks display (expand in list vs detail)",
+			},
 		],
 	},
 	{
 		title: "Navigation",
 		shortcuts: [
+			{
+				keys: ["⌘", "C"],
+				description: "Go to Calendar view",
+			},
 			{
 				keys: ["Ctrl", "Tab"],
 				description: "Navigate to next list or smart view",
@@ -114,7 +127,7 @@ const shortcutCategories: ShortcutCategory[] = [
 			},
 			{
 				keys: ["t"],
-				description: "Focus quick-add task input",
+				description: "Focus inline add input (current list / view)",
 			},
 		],
 	},

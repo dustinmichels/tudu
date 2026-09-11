@@ -13,7 +13,7 @@ use crate::models::{
 };
 
 pub const LIST_SELECT_COLS: &str =
-    "id, name, color, position, is_archived, extra, created_at, updated_at, deleted_at";
+    "id, name, color, position, is_archived, icon, extra, created_at, updated_at, deleted_at";
 
 pub const TASK_SELECT_COLS: &str =
     "id, uid, parent_id, list_id, title, description, due, is_all_day, rrule, priority, location, url, completed, completed_at, status, start, duration, timezone, percent_complete, color, position, geo_latitude, geo_longitude, extra, created_at, updated_at, deleted_at";
@@ -27,7 +27,8 @@ fn now_iso() -> String {
 
 fn row_to_list(row: &Row) -> Result<List, libsql::Error> {
     let is_archived_int: i64 = row.get(4).unwrap_or(0);
-    let extra_str: Option<String> = row.get(5)?;
+    let icon: Option<String> = row.get(5)?;
+    let extra_str: Option<String> = row.get(6)?;
     let extra = extra_str.and_then(|s| serde_json::from_str(&s).ok());
     Ok(List {
         id: row.get(0)?,
@@ -35,10 +36,11 @@ fn row_to_list(row: &Row) -> Result<List, libsql::Error> {
         color: row.get(2)?,
         position: row.get(3)?,
         is_archived: is_archived_int != 0,
+        icon,
         extra,
-        created_at: row.get(6)?,
-        updated_at: row.get(7)?,
-        deleted_at: row.get(8)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
+        deleted_at: row.get(9)?,
     })
 }
 
@@ -162,6 +164,7 @@ pub async fn create_list_impl(
     conn: &Connection,
     name: String,
     color: Option<String>,
+    icon: Option<String>,
 ) -> Result<List, String> {
     let name = name.trim().to_string();
     if name.is_empty() {
@@ -191,9 +194,9 @@ pub async fn create_list_impl(
     let now = now_iso();
 
     conn.execute(
-        "INSERT INTO lists (id, name, color, position, is_archived, extra, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, 0, NULL, ?5, ?5)",
-        params![id.clone(), name.clone(), color.clone(), position, now.clone()],
+        "INSERT INTO lists (id, name, color, position, is_archived, icon, extra, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, 0, ?5, NULL, ?6, ?6)",
+        params![id.clone(), name.clone(), color.clone(), position, icon.clone(), now.clone()],
     )
     .await
     .map_err(|e| format!("Failed to insert list: {}", e))?;
@@ -204,6 +207,7 @@ pub async fn create_list_impl(
         color,
         position,
         is_archived: false,
+        icon,
         extra: None,
         created_at: now.clone(),
         updated_at: now,
@@ -216,8 +220,9 @@ pub async fn create_list(
     state: State<'_, DbState>,
     name: String,
     color: Option<String>,
+    icon: Option<String>,
 ) -> Result<List, String> {
-    create_list_impl(&state.conn, name, color).await
+    create_list_impl(&state.conn, name, color, icon).await
 }
 pub async fn update_list_impl(
     conn: &Connection,
@@ -225,6 +230,7 @@ pub async fn update_list_impl(
     name: Option<String>,
     color: Option<Option<String>>,
     position: Option<i64>,
+    icon: Option<Option<String>>,
 ) -> Result<List, String> {
     let mut rows = conn
         .query(
@@ -272,6 +278,14 @@ pub async fn update_list_impl(
         sets.push(format!("position = ?{}", query_params.len()));
     }
 
+    if let Some(new_icon) = icon {
+        match new_icon {
+            Some(i) => query_params.push(libsql::Value::Text(i)),
+            None => query_params.push(libsql::Value::Null),
+        }
+        sets.push(format!("icon = ?{}", query_params.len()));
+    }
+
     let now = now_iso();
     query_params.push(libsql::Value::Text(now.clone()));
     sets.push(format!("updated_at = ?{}", query_params.len()));
@@ -312,8 +326,9 @@ pub async fn update_list(
     name: Option<String>,
     color: Option<Option<String>>,
     position: Option<i64>,
+    icon: Option<Option<String>>,
 ) -> Result<List, String> {
-    update_list_impl(&state.conn, id, name, color, position).await
+    update_list_impl(&state.conn, id, name, color, position, icon).await
 }
 
 
@@ -451,6 +466,12 @@ pub async fn get_tasks_impl(
                 } else {
                     conditions.push("(t.completed = 0 AND t.due IS NOT NULL AND date(t.due) <= date('now', 'localtime', '+7 days'))".to_string());
                 }
+            }
+            "overdue" => {
+                if !include_completed {
+                    conditions.push("t.completed = 0".to_string());
+                }
+                conditions.push("(t.due IS NOT NULL AND date(t.due) < date('now', 'localtime'))".to_string());
             }
             "trash" => {
                 if !include_completed {
@@ -1885,6 +1906,7 @@ pub async fn export_backup_impl(conn: &Connection) -> Result<OpenTaskDocument, S
             color: l.color,
             position: l.position,
             is_archived: l.is_archived,
+            icon: l.icon,
             extra: l.extra,
         })
         .collect();
@@ -2080,7 +2102,7 @@ pub async fn import_backup_impl(
         {
             conn.execute(
                 "UPDATE lists
-                 SET name = ?2, color = ?3, position = ?4, is_archived = ?5, extra = ?6, updated_at = ?7, deleted_at = NULL
+                 SET name = ?2, color = ?3, position = ?4, is_archived = ?5, icon = ?6, extra = ?7, updated_at = ?8, deleted_at = NULL
                  WHERE id = ?1",
                 params![
                     list_id,
@@ -2088,6 +2110,7 @@ pub async fn import_backup_impl(
                     list.color,
                     list.position,
                     is_archived_int,
+                    list.icon,
                     extra_str,
                     now.clone()
                 ],
@@ -2096,14 +2119,15 @@ pub async fn import_backup_impl(
             .map_err(|e| format!("Failed to update list: {}", e))?;
         } else {
             conn.execute(
-                "INSERT INTO lists (id, name, color, position, is_archived, extra, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+                "INSERT INTO lists (id, name, color, position, is_archived, icon, extra, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
                 params![
                     list_id,
                     list.name,
                     list.color,
                     list.position,
                     is_archived_int,
+                    list.icon,
                     extra_str,
                     now.clone()
                 ],
@@ -2602,7 +2626,7 @@ mod tests {
             assert!(delete_inbox_res.is_err(), "Deleting Inbox list must fail");
 
             // Create custom lists
-            let list1 = create_list_impl(&conn, "Work".to_string(), Some("#ff0000".to_string()))
+            let list1 = create_list_impl(&conn, "Work".to_string(), Some("#ff0000".to_string()), None)
                 .await
                 .expect("create list 1");
             assert_eq!(list1.name, "Work");
@@ -2610,7 +2634,7 @@ mod tests {
             assert_eq!(list1.position, 1);
             assert!(!list1.is_archived);
 
-            let list2 = create_list_impl(&conn, "Personal".to_string(), None)
+            let list2 = create_list_impl(&conn, "Personal".to_string(), None, None)
                 .await
                 .expect("create list 2");
             assert_eq!(list2.name, "Personal");
@@ -2653,7 +2677,7 @@ mod tests {
         tauri::async_runtime::block_on(async {
             let (conn, temp_dir) = setup_test_conn().await;
 
-            let list = create_list_impl(&conn, "Personal".to_string(), None)
+            let list = create_list_impl(&conn, "Personal".to_string(), None, None)
                 .await
                 .expect("create list");
 
@@ -2791,7 +2815,7 @@ mod tests {
         tauri::async_runtime::block_on(async {
             let (conn, temp_dir) = setup_test_conn().await;
 
-            let list = create_list_impl(&conn, "Work".to_string(), None)
+            let list = create_list_impl(&conn, "Work".to_string(), None, None)
                 .await
                 .expect("create list");
             let task = create_task_impl(
@@ -2859,7 +2883,7 @@ mod tests {
         tauri::async_runtime::block_on(async {
             let (conn, temp_dir) = setup_test_conn().await;
 
-            let list = create_list_impl(&conn, "Reminders List".to_string(), None)
+            let list = create_list_impl(&conn, "Reminders List".to_string(), None, None)
                 .await
                 .expect("create list");
             let task = create_task_impl(
@@ -2933,7 +2957,7 @@ mod tests {
             let (conn, temp_dir) = setup_test_conn().await;
 
             // Create initial data
-            let list = create_list_impl(&conn, "Sprint Tasks".to_string(), Some("#6366f1".to_string()))
+            let list = create_list_impl(&conn, "Sprint Tasks".to_string(), Some("#6366f1".to_string()), None)
                 .await
                 .expect("create list");
 
@@ -3116,6 +3140,7 @@ mod tests {
                     conn,
                     "Project Launch".to_string(),
                     Some("#10b981".to_string()),
+                    None,
                 )
                 .await
                 .expect("create list");
@@ -3313,6 +3338,13 @@ mod tests {
             assert!(week_titles.contains(&"This week task".to_string()));
             assert!(!week_titles.contains(&"Future task".to_string()));
 
+            // Query "overdue" view -> overdue task (1 task)
+            let overdue_tasks = get_tasks_impl(&conn, None, Some(false), Some("overdue".to_string()), None, None, None, None)
+                .await
+                .expect("get overdue tasks");
+            assert_eq!(overdue_tasks.len(), 1);
+            assert_eq!(overdue_tasks[0].title, "Overdue task");
+
             let _ = std::fs::remove_dir_all(temp_dir);
         });
     }
@@ -3323,7 +3355,7 @@ mod tests {
             let (conn, temp_dir) = setup_test_conn().await;
 
             // 1. List updates
-            let list = create_list_impl(&conn, "Old List Name".to_string(), Some("#000000".to_string()))
+            let list = create_list_impl(&conn, "Old List Name".to_string(), Some("#000000".to_string()), Some("List".to_string()))
                 .await
                 .expect("create list");
             let updated_list = update_list_impl(
@@ -3332,12 +3364,14 @@ mod tests {
                 Some("New List Name".to_string()),
                 Some(Some("#123456".to_string())),
                 Some(5),
+                Some(Some("Folder".to_string())),
             )
             .await
             .expect("update list");
             assert_eq!(updated_list.name, "New List Name");
             assert_eq!(updated_list.color, Some("#123456".to_string()));
             assert_eq!(updated_list.position, 5);
+            assert_eq!(updated_list.icon, Some("Folder".to_string()));
 
             // Cannot rename Inbox
             let lists = get_lists_impl(&conn).await.unwrap();
@@ -3346,6 +3380,7 @@ mod tests {
                 &conn,
                 inbox.id.clone(),
                 Some("Renamed Inbox".to_string()),
+                None,
                 None,
                 None,
             )

@@ -10,7 +10,7 @@ import TaskDetail from "./components/TaskDetail.vue";
 import CalendarView from "./components/CalendarView.vue";
 import TaskList from "./components/TaskList.vue";
 import { useFilterStore } from "./stores/filters.ts";
-import { useListStore } from "./stores/lists.ts";
+import { type DefaultView, useListStore } from "./stores/lists.ts";
 import { useTagStore } from "./stores/tags.ts";
 import { useTaskStore } from "./stores/tasks.ts";
 import { useUIStore } from "./stores/ui.ts";
@@ -28,6 +28,7 @@ function handlePreventDefault(e: DragEvent) {
 onMounted(async () => {
 	window.addEventListener("dragover", handlePreventDefault);
 	window.addEventListener("drop", handlePreventDefault);
+	window.addEventListener("keydown", handleAppKeyDown);
 
 	try {
 		await Promise.all([listStore.fetchLists(), taskStore.fetchAllTasks(), tagStore.fetchTags()]);
@@ -39,6 +40,7 @@ onMounted(async () => {
 onUnmounted(() => {
 	window.removeEventListener("dragover", handlePreventDefault);
 	window.removeEventListener("drop", handlePreventDefault);
+	window.removeEventListener("keydown", handleAppKeyDown);
 });
 
 watch(
@@ -71,6 +73,180 @@ watch(
 		}
 	},
 );
+
+function handleAppKeyDown(e: KeyboardEvent) {
+	if (e.defaultPrevented) return;
+
+	const target = e.target as HTMLElement | null;
+	const isEditingInput =
+		target &&
+		(target.tagName === "INPUT" ||
+			target.tagName === "TEXTAREA" ||
+			target.tagName === "SELECT" ||
+			target.isContentEditable);
+
+	const isMod = e.metaKey || e.ctrlKey;
+
+	// Global app shortcuts
+	// Cmd/Ctrl + Shift + P -> Open Command Palette (Control Panel)
+	if (isMod && e.shiftKey && (e.key === "P" || e.key === "p")) {
+		e.preventDefault();
+		uiStore.toggleCommandPalette(undefined, "commands");
+		return;
+	}
+
+	// Cmd/Ctrl + P -> Open List / View Picker
+	if (isMod && !e.shiftKey && !e.altKey && (e.key === "p" || e.key === "P")) {
+		e.preventDefault();
+		uiStore.toggleCommandPalette(undefined, "lists");
+		return;
+	}
+
+	// Cmd/Ctrl + C -> Open Calendar view (unless editing text or text is highlighted)
+	if (isMod && !e.shiftKey && !e.altKey && (e.key === "c" || e.key === "C")) {
+		const hasSelection =
+			typeof window !== "undefined" && (window.getSelection()?.toString().trim().length ?? 0) > 0;
+
+		if (!isEditingInput && !hasSelection) {
+			e.preventDefault();
+			filterStore.setTagFilter(null);
+			filterStore.setListFilter(null);
+			filterStore.setSmartView(null);
+			listStore.setActiveView("calendar");
+			listStore.setActiveList(null);
+			taskStore.setActiveTask(null);
+			return;
+		}
+	}
+
+	// Cmd/Ctrl + B -> Toggle primary sidebar
+	if (isMod && !e.shiftKey && !e.altKey && (e.key === "b" || e.key === "B")) {
+		e.preventDefault();
+		uiStore.toggleSidebar();
+		return;
+	}
+
+	// Cmd/Ctrl + J -> Toggle detail panel
+	if (isMod && !e.shiftKey && !e.altKey && (e.key === "j" || e.key === "J")) {
+		e.preventDefault();
+		uiStore.toggleDetail();
+		return;
+	}
+
+	// Cmd/Ctrl + H -> Toggle show/hide completed tasks
+	if (isMod && !e.shiftKey && !e.altKey && (e.key === "h" || e.key === "H")) {
+		e.preventDefault();
+		const next = !taskStore.includeCompleted;
+		taskStore.setIncludeCompleted(next);
+		filterStore.setIncludeCompleted(next);
+		return;
+	}
+
+	// Cmd/Ctrl + N -> Open Quick Capture modal
+	if (isMod && !e.shiftKey && !e.altKey && (e.key === "n" || e.key === "N")) {
+		e.preventDefault();
+		uiStore.toggleCapture(true);
+		return;
+	}
+
+	// Escape -> close open modals
+	if (e.key === "Escape") {
+		if (uiStore.isCommandPaletteOpen) {
+			e.preventDefault();
+			uiStore.toggleCommandPalette(false);
+			return;
+		}
+		if (uiStore.isShortcutsOpen) {
+			e.preventDefault();
+			uiStore.toggleShortcuts(false);
+			return;
+		}
+		if (uiStore.isCaptureOpen) {
+			e.preventDefault();
+			uiStore.toggleCapture(false);
+			return;
+		}
+		if (uiStore.isImportOpen) {
+			e.preventDefault();
+			uiStore.toggleImport(false);
+			return;
+		}
+	}
+
+	// '?' -> show keyboard shortcuts (when not typing in an input)
+	if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey && !isEditingInput) {
+		e.preventDefault();
+		uiStore.toggleShortcuts(true);
+		return;
+	}
+
+	// Ctrl + Tab / Ctrl + Shift + Tab -> Navigate between lists/views
+	handleNavKeyDown(e);
+}
+
+function handleNavKeyDown(e: KeyboardEvent) {
+	if (e.defaultPrevented) return;
+	const isNext = e.ctrlKey && !e.shiftKey && !e.metaKey && !e.altKey && e.key === "Tab";
+	const isPrev = e.ctrlKey && e.shiftKey && !e.metaKey && !e.altKey && e.key === "Tab";
+	if (!isNext && !isPrev) return;
+	e.preventDefault();
+	const SMART_VIEW_ORDER: DefaultView[] = [
+		"inbox",
+		"all",
+		"today",
+		"tomorrow",
+		"this_week",
+		"overdue",
+		"calendar",
+		"trash",
+	];
+	type NavItem =
+		| { type: "home" }
+		| { type: "view"; id: DefaultView }
+		| { type: "list"; id: string };
+	const navItems: NavItem[] = [
+		{ type: "home" },
+		...SMART_VIEW_ORDER.map((id) => ({ type: "view" as const, id })),
+		...listStore.sortedLists.map((l) => ({ type: "list" as const, id: l.id })),
+	];
+	let currentNavIndex: number;
+	if (!listStore.activeListId && !listStore.activeView && !filterStore.selectedTag) {
+		currentNavIndex = 0;
+	} else if (listStore.activeView) {
+		currentNavIndex = navItems.findIndex((n) => n.type === "view" && n.id === listStore.activeView);
+	} else if (listStore.activeListId) {
+		currentNavIndex = navItems.findIndex(
+			(n) => n.type === "list" && n.id === listStore.activeListId,
+		);
+	} else {
+		currentNavIndex = 0;
+	}
+	if (currentNavIndex === -1) currentNavIndex = 0;
+	const nextNavIndex = isNext
+		? (currentNavIndex + 1) % navItems.length
+		: (currentNavIndex - 1 + navItems.length) % navItems.length;
+	const nextNav = navItems[nextNavIndex];
+	if (!nextNav) return;
+	filterStore.setTagFilter(null);
+	if (nextNav.type === "home") {
+		filterStore.setListFilter(null);
+		filterStore.setSmartView(null);
+		listStore.goHome();
+		taskStore.setActiveTask(null);
+	} else if (nextNav.type === "view") {
+		filterStore.setListFilter(null);
+		listStore.setActiveList(null);
+		filterStore.setSmartView(nextNav.id === "calendar" ? null : nextNav.id);
+		listStore.setActiveView(nextNav.id);
+		taskStore.setActiveTask(null);
+	} else {
+		filterStore.setSmartView(null);
+		listStore.setActiveView(null);
+		filterStore.setListFilter(nextNav.id);
+		listStore.setActiveList(nextNav.id);
+		taskStore.setActiveTask(null);
+	}
+}
 </script>
 
 <template>
