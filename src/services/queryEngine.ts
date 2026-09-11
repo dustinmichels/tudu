@@ -1,13 +1,7 @@
 import type { Task } from "../models/index.ts";
 import { type SortOptions, sortTasks } from "../utils/sorting.ts";
 
-export type SmartView =
-	| "inbox"
-	| "today"
-	| "tomorrow"
-	| "this_week"
-	| "all"
-	| "trash";
+export type SmartView = "inbox" | "today" | "tomorrow" | "this_week" | "all" | "trash";
 
 export type CompletionFilter = "all" | "incomplete" | "completed";
 
@@ -29,9 +23,7 @@ export interface QueryCriteria extends SmartListContext {
 /**
  * Parses an ISO string or YYYY-MM-DD date string into a local Date object.
  */
-export function parseDueDateToLocal(
-	due: string | null | undefined,
-): Date | null {
+export function parseDueDateToLocal(due: string | null | undefined): Date | null {
 	if (!due) return null;
 	const trimmed = due.trim();
 	const dateOnlyMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
@@ -48,10 +40,7 @@ export function parseDueDateToLocal(
 /**
  * Check if a task's due date is overdue (strictly before today).
  */
-export function isOverdue(
-	due: string | null | undefined,
-	now: Date = new Date(),
-): boolean {
+export function isOverdue(due: string | null | undefined, now: Date = new Date()): boolean {
 	const d = parseDueDateToLocal(due);
 	if (!d) return false;
 
@@ -63,10 +52,7 @@ export function isOverdue(
 /**
  * Check if a task's due date is today or overdue.
  */
-export function isTodayOrOverdue(
-	due: string | null | undefined,
-	now: Date = new Date(),
-): boolean {
+export function isTodayOrOverdue(due: string | null | undefined, now: Date = new Date()): boolean {
 	const d = parseDueDateToLocal(due);
 	if (!d) return false;
 
@@ -78,10 +64,7 @@ export function isTodayOrOverdue(
 /**
  * Check if a task's due date falls on tomorrow.
  */
-export function isTomorrow(
-	due: string | null | undefined,
-	now: Date = new Date(),
-): boolean {
+export function isTomorrow(due: string | null | undefined, now: Date = new Date()): boolean {
 	const d = parseDueDateToLocal(due);
 	if (!d) return false;
 
@@ -99,10 +82,7 @@ export function isTomorrow(
 /**
  * Check if a task's due date is within the next 7 days.
  */
-export function isThisWeek(
-	due: string | null | undefined,
-	now: Date = new Date(),
-): boolean {
+export function isThisWeek(due: string | null | undefined, now: Date = new Date()): boolean {
 	const d = parseDueDateToLocal(due);
 	if (!d) return false;
 
@@ -138,9 +118,7 @@ export function matchesSmartView(
 
 	switch (view) {
 		case "inbox":
-			return (
-				context.inboxListId != null && task.list_id === context.inboxListId
-			);
+			return context.inboxListId != null && task.list_id === context.inboxListId;
 
 		case "today":
 			return isTodayOrOverdue(task.due, now);
@@ -197,8 +175,7 @@ function taskMatchesTag(task: Task, tagFilter: string): boolean {
 		if (typeof item === "string") return item === tagFilter;
 		if (item && typeof item === "object") {
 			const id = "id" in item ? String((item as { id: unknown }).id) : "";
-			const name =
-				"name" in item ? String((item as { name: unknown }).name) : "";
+			const name = "name" in item ? String((item as { name: unknown }).name) : "";
 			return id === tagFilter || name === tagFilter;
 		}
 		return false;
@@ -208,10 +185,7 @@ function taskMatchesTag(task: Task, tagFilter: string): boolean {
 /**
  * Filter and sort tasks according to QueryCriteria.
  */
-export function queryTasks(
-	tasks: Task[],
-	criteria: QueryCriteria = {},
-): Task[] {
+export function queryTasks(tasks: Task[], criteria: QueryCriteria = {}): Task[] {
 	const {
 		smartView,
 		listId,

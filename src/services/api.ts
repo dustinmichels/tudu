@@ -29,10 +29,7 @@ export class ApiError extends Error {
 	}
 }
 
-async function safeInvoke<T>(
-	command: string,
-	args?: Record<string, unknown>,
-): Promise<T> {
+async function safeInvoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
 	try {
 		return await invoke<T>(command, args);
 	} catch (error) {
@@ -55,10 +52,7 @@ export async function getLists(): Promise<List[]> {
 	return safeInvoke<List[]>("get_lists");
 }
 
-export async function createList(
-	name: string,
-	color?: string | null,
-): Promise<List> {
+export async function createList(name: string, color?: string | null): Promise<List> {
 	return safeInvoke<List>("create_list", {
 		name,
 		color: color ?? null,
@@ -103,9 +97,7 @@ export async function getTasks(
 	return res ?? [];
 }
 
-export async function getTasksWithOptions(
-	options: GetTasksOptions,
-): Promise<Task[]> {
+export async function getTasksWithOptions(options: GetTasksOptions): Promise<Task[]> {
 	return getTasks(
 		options.listId,
 		options.includeCompleted,
@@ -139,16 +131,11 @@ export async function deleteTask(id: string): Promise<void> {
 	return safeInvoke<void>("delete_task", { id });
 }
 
-export async function toggleTaskComplete(
-	id: string,
-	completed: boolean,
-): Promise<Task> {
+export async function toggleTaskComplete(id: string, completed: boolean): Promise<Task> {
 	return safeInvoke<Task>("toggle_task_complete", { id, completed });
 }
 
-export async function batchUpdateTasks(
-	input: BatchUpdateTasksInput,
-): Promise<Task[]> {
+export async function batchUpdateTasks(input: BatchUpdateTasksInput): Promise<Task[]> {
 	return safeInvoke<Task[]>("batch_update_tasks", { input });
 }
 
@@ -160,10 +147,7 @@ export async function getTags(): Promise<Tag[]> {
 	return safeInvoke<Tag[]>("get_tags");
 }
 
-export async function createTag(
-	name: string,
-	color?: string | null,
-): Promise<Tag> {
+export async function createTag(name: string, color?: string | null): Promise<Tag> {
 	return safeInvoke<Tag>("create_tag", {
 		name,
 		color: color ?? null,
@@ -232,9 +216,7 @@ export async function exportBackup(): Promise<OpenTaskDocument> {
 	return safeInvoke<OpenTaskDocument>("export_backup");
 }
 
-export async function importBackup(
-	document: OpenTaskDocument,
-): Promise<ImportBackupResult> {
+export async function importBackup(document: OpenTaskDocument): Promise<ImportBackupResult> {
 	return safeInvoke<ImportBackupResult>("import_backup", { document });
 }
 

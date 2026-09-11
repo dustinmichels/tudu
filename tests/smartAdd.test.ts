@@ -36,15 +36,11 @@ describe("Smart Add Parser and Helpers", () => {
 			// Thursday -> Monday is +4
 			expect(resolveRelativeDueDate("monday", fixedBase)).toBe("2026-09-14");
 			// Thursday -> next Friday is +8
-			expect(resolveRelativeDueDate("next friday", fixedBase)).toBe(
-				"2026-09-18",
-			);
+			expect(resolveRelativeDueDate("next friday", fixedBase)).toBe("2026-09-18");
 		});
 
 		it("keeps valid ISO dates", () => {
-			expect(resolveRelativeDueDate("2026-12-25", fixedBase)).toBe(
-				"2026-12-25",
-			);
+			expect(resolveRelativeDueDate("2026-12-25", fixedBase)).toBe("2026-12-25");
 		});
 	});
 
@@ -116,12 +112,8 @@ describe("Smart Add Parser and Helpers", () => {
 			const lists = ["Inbox", "Personal", "Work"];
 			const suggestions = getTagAndListSuggestions(tags, lists, "work");
 
-			expect(
-				suggestions.some((s) => s.type === "list" && s.label === "Work"),
-			).toBe(true);
-			expect(
-				suggestions.some((s) => s.type === "tag" && s.label === "work"),
-			).toBe(true);
+			expect(suggestions.some((s) => s.type === "list" && s.label === "Work")).toBe(true);
+			expect(suggestions.some((s) => s.type === "tag" && s.label === "work")).toBe(true);
 		});
 
 		it("suggests new tag when no matches found", () => {
@@ -129,11 +121,9 @@ describe("Smart Add Parser and Helpers", () => {
 			const lists = ["Inbox"];
 			const suggestions = getTagAndListSuggestions(tags, lists, "finances");
 
-			expect(
-				suggestions.some(
-					(s) => s.label === "finances" && s.description === "New tag",
-				),
-			).toBe(true);
+			expect(suggestions.some((s) => s.label === "finances" && s.description === "New tag")).toBe(
+				true,
+			);
 		});
 	});
 
@@ -153,11 +143,7 @@ describe("Smart Add Parser and Helpers", () => {
 		});
 
 		it("handles multiple tags and quoted names with spaces", () => {
-			const parsed = parseSmartAdd(
-				'Pay taxes #"tax return" ^"next friday" !2',
-				[],
-				fixedBase,
-			);
+			const parsed = parseSmartAdd('Pay taxes #"tax return" ^"next friday" !2', [], fixedBase);
 
 			expect(parsed.title).toBe("Pay taxes");
 			expect(parsed.tags).toEqual(["tax return"]);
@@ -175,11 +161,7 @@ describe("Smart Add Parser and Helpers", () => {
 		});
 
 		it("cleans tokens whether at the beginning, middle, or end", () => {
-			const parsed = parseSmartAdd(
-				"!1 ^today Buy milk #groceries at store",
-				[],
-				fixedBase,
-			);
+			const parsed = parseSmartAdd("!1 ^today Buy milk #groceries at store", [], fixedBase);
 			expect(parsed.title).toBe("Buy milk at store");
 			expect(parsed.priority).toBe(1);
 			expect(parsed.due).toBe("2026-09-10");

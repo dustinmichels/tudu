@@ -7,6 +7,7 @@ export const useUIStore = defineStore("ui", () => {
 	const isSettingsOpen = ref(false); // Settings modal/popover
 	const isImportOpen = ref(false); // Import modal
 	const isShortcutsOpen = ref(false); // Keyboard shortcuts modal
+	const isCaptureOpen = ref(false); // Capture task modal
 	const isCommandPaletteOpen = ref(false); // Global command palette / control panel
 	const commandPaletteInitialMode = ref<"commands" | "lists">("commands");
 	const syncStatus = ref<"synced" | "syncing" | "offline" | "error">("offline");
@@ -30,12 +31,8 @@ export const useUIStore = defineStore("ui", () => {
 		isShortcutsOpen.value = open !== undefined ? open : !isShortcutsOpen.value;
 	}
 
-	function toggleCommandPalette(
-		open?: boolean,
-		mode: "commands" | "lists" = "commands",
-	) {
-		isCommandPaletteOpen.value =
-			open !== undefined ? open : !isCommandPaletteOpen.value;
+	function toggleCommandPalette(open?: boolean, mode: "commands" | "lists" = "commands") {
+		isCommandPaletteOpen.value = open !== undefined ? open : !isCommandPaletteOpen.value;
 		if (isCommandPaletteOpen.value) {
 			commandPaletteInitialMode.value = mode;
 		}
@@ -47,6 +44,9 @@ export const useUIStore = defineStore("ui", () => {
 	}
 	function setSyncStatus(status: "synced" | "syncing" | "offline" | "error") {
 		syncStatus.value = status;
+	}
+	function toggleCapture(open?: boolean) {
+		isCaptureOpen.value = open !== undefined ? open : !isCaptureOpen.value;
 	}
 
 	return {
@@ -65,6 +65,8 @@ export const useUIStore = defineStore("ui", () => {
 		commandPaletteInitialMode,
 		toggleCommandPalette,
 		openCommandPalette,
+		isCaptureOpen,
+		toggleCapture,
 		setSyncStatus,
 	};
 });

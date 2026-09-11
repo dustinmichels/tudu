@@ -182,12 +182,8 @@ describe("Phase 3: Smart List Query Engine", () => {
 		const inboxTask = makeTask({ list_id: "inbox-id" });
 		const workTask = makeTask({ list_id: "work-id" });
 
-		expect(
-			matchesSmartView(inboxTask, "inbox", { inboxListId: "inbox-id" }),
-		).toBeTrue();
-		expect(
-			matchesSmartView(workTask, "inbox", { inboxListId: "inbox-id" }),
-		).toBeFalse();
+		expect(matchesSmartView(inboxTask, "inbox", { inboxListId: "inbox-id" })).toBeTrue();
+		expect(matchesSmartView(workTask, "inbox", { inboxListId: "inbox-id" })).toBeFalse();
 	});
 
 	test("All Tasks matches all non-deleted tasks", () => {
@@ -206,12 +202,8 @@ describe("Phase 3: Smart List Query Engine", () => {
 		expect(matchesSmartView(activeTask, "trash")).toBeFalse();
 
 		// Non-trash views reject soft-deleted tasks
-		expect(
-			matchesSmartView(deletedTask, "today", { now: fixedNow }),
-		).toBeFalse();
-		expect(
-			matchesSmartView(deletedTask, "inbox", { inboxListId: "list-default" }),
-		).toBeFalse();
+		expect(matchesSmartView(deletedTask, "today", { now: fixedNow })).toBeFalse();
+		expect(matchesSmartView(deletedTask, "inbox", { inboxListId: "list-default" })).toBeFalse();
 	});
 
 	test("querySmartList filters collection by smart view", () => {
@@ -423,11 +415,7 @@ describe("Phase 3: Sorting Utilities", () => {
 			completedToEnd: true,
 		});
 
-		expect(sorted.map((t) => t.id)).toEqual([
-			"p2-pending",
-			"p3-pending",
-			"p1-done",
-		]);
+		expect(sorted.map((t) => t.id)).toEqual(["p2-pending", "p3-pending", "p1-done"]);
 	});
 
 	test("compareByCompletion sorts incomplete tasks before completed tasks", () => {

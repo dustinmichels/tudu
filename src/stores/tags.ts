@@ -1,10 +1,7 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import type { Tag } from "../models/index.ts";
-import {
-	createTag as apiCreateTag,
-	getTags as apiGetTags,
-} from "../services/api.ts";
+import { createTag as apiCreateTag, getTags as apiGetTags } from "../services/api.ts";
 import { useTaskStore } from "./tasks.ts";
 
 export interface TagWithCount extends Tag {

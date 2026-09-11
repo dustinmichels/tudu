@@ -84,9 +84,7 @@ mock.module("@tauri-apps/api/core", () => ({
 					if (existing) {
 						const updated: Task = {
 							...existing,
-							...(input.completed !== undefined
-								? { completed: input.completed }
-								: {}),
+							...(input.completed !== undefined ? { completed: input.completed } : {}),
 							...(input.priority !== undefined
 								? { priority: input.priority as Task["priority"] }
 								: {}),
@@ -171,26 +169,13 @@ describe("Phase 8: Quick Actions, Keyboard Shortcuts & Polish", () => {
 		await store.fetchAllTasks();
 
 		// Rapid calls
-		const p1 = store.updateTask(
-			{ id: "task-1", location: "Loc 1" },
-			{ debounceMs: 10 },
-		);
-		const p2 = store.updateTask(
-			{ id: "task-1", location: "Loc 2" },
-			{ debounceMs: 10 },
-		);
-		const p3 = store.updateTask(
-			{ id: "task-1", location: "Loc Final" },
-			{ debounceMs: 10 },
-		);
+		const p1 = store.updateTask({ id: "task-1", location: "Loc 1" }, { debounceMs: 10 });
+		const p2 = store.updateTask({ id: "task-1", location: "Loc 2" }, { debounceMs: 10 });
+		const p3 = store.updateTask({ id: "task-1", location: "Loc Final" }, { debounceMs: 10 });
 
 		// Check immediate optimistic mutation has final value
-		expect(store.tasks.find((t) => t.id === "task-1")?.location).toBe(
-			"Loc Final",
-		);
-		expect(store.allTasks.find((t) => t.id === "task-1")?.location).toBe(
-			"Loc Final",
-		);
+		expect(store.tasks.find((t) => t.id === "task-1")?.location).toBe("Loc Final");
+		expect(store.allTasks.find((t) => t.id === "task-1")?.location).toBe("Loc Final");
 
 		const [r1, r2, r3] = await Promise.all([p1, p2, p3]);
 
@@ -210,16 +195,10 @@ describe("Phase 8: Quick Actions, Keyboard Shortcuts & Polish", () => {
 		pendingInFlightResolver = () => {};
 
 		// Immediate flush for request A; it enters invoke and pauses
-		const pA = store.updateTask(
-			{ id: "task-1", title: "Title A" },
-			{ debounceMs: 0 },
-		);
+		const pA = store.updateTask({ id: "task-1", title: "Title A" }, { debounceMs: 0 });
 
 		// Request B arrives while A is paused in-flight with debounceMs: 20
-		const pB = store.updateTask(
-			{ id: "task-1", title: "Title B" },
-			{ debounceMs: 20 },
-		);
+		const pB = store.updateTask({ id: "task-1", title: "Title B" }, { debounceMs: 20 });
 
 		// Wait 40ms so B's timer expires while A is STILL in-flight
 		// This exercises processDebounceQueue entering while activePromise is set
@@ -284,9 +263,7 @@ describe("Phase 8: Quick Actions, Keyboard Shortcuts & Polish", () => {
 		);
 
 		// Optimistic before failure
-		expect(store.tasks.find((t) => t.id === "task-1")?.title).toBe(
-			"Should Fail",
-		);
+		expect(store.tasks.find((t) => t.id === "task-1")?.title).toBe("Should Fail");
 
 		try {
 			await updatePromise;
@@ -296,11 +273,7 @@ describe("Phase 8: Quick Actions, Keyboard Shortcuts & Polish", () => {
 		}
 
 		// Rolled back to initial title
-		expect(store.tasks.find((t) => t.id === "task-1")?.title).toBe(
-			"Initial Task",
-		);
-		expect(store.allTasks.find((t) => t.id === "task-1")?.title).toBe(
-			"Initial Task",
-		);
+		expect(store.tasks.find((t) => t.id === "task-1")?.title).toBe("Initial Task");
+		expect(store.allTasks.find((t) => t.id === "task-1")?.title).toBe("Initial Task");
 	});
 });

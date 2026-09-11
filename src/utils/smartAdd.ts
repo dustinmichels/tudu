@@ -38,10 +38,7 @@ export function formatDateIso(d: Date): string {
 /**
  * Resolve relative date keywords to YYYY-MM-DD
  */
-export function resolveRelativeDueDate(
-	raw: string,
-	baseDate: Date = new Date(),
-): string | null {
+export function resolveRelativeDueDate(raw: string, baseDate: Date = new Date()): string | null {
 	const cleaned = raw
 		.trim()
 		.toLowerCase()
@@ -139,10 +136,7 @@ export function resolveRelativeDueDate(
 /**
  * Detect if cursor is currently inside a smart shortcut token (#tag, ^due, !priority).
  */
-export function detectSmartToken(
-	text: string,
-	cursorPos: number,
-): ActiveSmartToken | null {
+export function detectSmartToken(text: string, cursorPos: number): ActiveSmartToken | null {
 	if (cursorPos < 0 || cursorPos > text.length) return null;
 
 	const textBeforeCursor = text.slice(0, cursorPos);
@@ -166,10 +160,7 @@ export function detectSmartToken(
 /**
  * Standard suggestions for Due Date (^)
  */
-export function getDueSuggestions(
-	query = "",
-	baseDate: Date = new Date(),
-): SmartSuggestion[] {
+export function getDueSuggestions(query = "", baseDate: Date = new Date()): SmartSuggestion[] {
 	const items: SmartSuggestion[] = [
 		{
 			type: "due",
@@ -313,9 +304,7 @@ export function getTagAndListSuggestions(
 	for (const tag of tags) {
 		if (!q || tag.toLowerCase().includes(q)) {
 			// Avoid duplicate label if tag matches list name exactly
-			const isAlsoList = lists.some(
-				(l) => l.toLowerCase() === tag.toLowerCase(),
-			);
+			const isAlsoList = lists.some((l) => l.toLowerCase() === tag.toLowerCase());
 			suggestions.push({
 				type: "tag",
 				label: tag,
@@ -327,11 +316,7 @@ export function getTagAndListSuggestions(
 	}
 
 	// If query doesn't match any existing tag or list, suggest creating a new tag
-	if (
-		q &&
-		!tags.some((t) => t.toLowerCase() === q) &&
-		!lists.some((l) => l.toLowerCase() === q)
-	) {
+	if (q && !tags.some((t) => t.toLowerCase() === q) && !lists.some((l) => l.toLowerCase() === q)) {
 		const cleanQuery = query.trim();
 		suggestions.push({
 			type: "tag",
@@ -400,9 +385,7 @@ export function parseSmartAdd(
 		const { prefix, value } = match;
 		if (prefix === "#") {
 			// Check if this matches a known list name (case-insensitive)
-			const matchedList = knownListNames.find(
-				(l) => l.toLowerCase() === value.toLowerCase(),
-			);
+			const matchedList = knownListNames.find((l) => l.toLowerCase() === value.toLowerCase());
 			if (matchedList && !listName) {
 				listName = matchedList;
 			} else {
@@ -418,8 +401,7 @@ export function parseSmartAdd(
 		} else if (prefix === "!") {
 			const p = value.toLowerCase();
 			if (p === "1" || p === "high" || p === "urgent") priority = 1;
-			else if (p === "2" || p === "med" || p === "medium" || p === "normal")
-				priority = 2;
+			else if (p === "2" || p === "med" || p === "medium" || p === "normal") priority = 2;
 			else if (p === "3" || p === "low") priority = 3;
 		}
 	}

@@ -1,0 +1,30 @@
+{
+	"format_on_save": "on",
+	"languages": {
+		"JavaScript": {
+			"formatter": {
+				"language_server": { "name": "oxc" }
+			}
+		},
+		"TypeScript": {
+			"formatter": {
+				"language_server": { "name": "oxc" }
+			}
+		},
+		"TSX": {
+			"formatter": {
+				"language_server": { "name": "oxc" }
+			}
+		},
+		"Vue.js": {
+			"formatter": {
+				"language_server": { "name": "oxc" }
+			}
+		},
+		"JSON": {
+			"formatter": {
+				"language_server": { "name": "oxc" }
+			}
+		}
+	}
+}

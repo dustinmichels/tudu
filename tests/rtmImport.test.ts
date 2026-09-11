@@ -1,9 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import rtmSample from "../samples/rememberthemilk_sample.json";
-import {
-	mapRememberTheMilkToOpenTask,
-	type RTMExport,
-} from "../src/services/rememberTheMilk.ts";
+import { mapRememberTheMilkToOpenTask, type RTMExport } from "../src/services/rememberTheMilk.ts";
 
 describe("Remember the Milk import mapping", () => {
 	test("converts rememberthemilk_sample.json to valid OpenTask v1.0 document and captures reasonable data", () => {
@@ -33,9 +30,7 @@ describe("Remember the Milk import mapping", () => {
 		const recentSmartList = doc.lists.find((l) => l.name === "Recent");
 		expect(recentSmartList).toBeDefined();
 		expect(recentSmartList?.extra?.is_smart_list).toBe(true);
-		expect(recentSmartList?.extra?.filter).toBe(
-			'updatedWithin:"4 day of  today"',
-		);
+		expect(recentSmartList?.extra?.filter).toBe('updatedWithin:"4 day of  today"');
 
 		// Tags capture
 		// Sample has 8 tags
@@ -53,9 +48,7 @@ describe("Remember the Milk import mapping", () => {
 		// Task 1001: Review Q3 financial summary (P1 priority -> high, due date, postponed count in extra, finance tag)
 		const task1001 = doc.tasks.find((t) => t.id === "1001");
 		expect(task1001).toBeDefined();
-		expect(task1001?.title).toBe(
-			"Review Q3 financial summary and tax documents",
-		);
+		expect(task1001?.title).toBe("Review Q3 financial summary and tax documents");
 		expect(task1001?.priority).toBe("high");
 		expect(task1001?.priority_raw).toBe("P1");
 		expect(task1001?.due).toBeDefined();
@@ -77,9 +70,7 @@ describe("Remember the Milk import mapping", () => {
 		expect(task1002?.notes).toBeDefined();
 		expect(task1002?.notes?.length).toBe(1);
 		expect(task1002?.notes?.[0]?.title).toBe("Meeting Agenda & Outline");
-		expect(task1002?.notes?.[0]?.content).toContain(
-			"Review current architecture bottlenecks",
-		);
+		expect(task1002?.notes?.[0]?.content).toContain("Review current architecture bottlenecks");
 		expect(task1002?.reminders).toBeDefined();
 		expect(task1002?.reminders?.length).toBe(1);
 
@@ -96,9 +87,7 @@ describe("Remember the Milk import mapping", () => {
 
 		// Task 1009 has URL
 		const task1009 = doc.tasks.find((t) => t.id === "1009");
-		expect(task1009?.url).toBe(
-			"https://example.com/papers/consensus-algorithms.pdf",
-		);
+		expect(task1009?.url).toBe("https://example.com/papers/consensus-algorithms.pdf");
 
 		// Task with repeats
 		const task1003 = doc.tasks.find((t) => t.id === "1003");

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import {
 	AlertCircle,
+	ArrowDown,
+	ArrowUp,
 	Calendar,
 	CalendarPlus,
 	CalendarRange,
@@ -24,12 +26,13 @@ import {
 	Tag as TagIcon,
 	Tags,
 	Trash2,
+	Zap,
 } from "lucide-vue-next";
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { PRIORITY, type Priority, type Tag } from "../models/index.ts";
 import { assignTag, getTaskDetail, removeTag } from "../services/api.ts";
 import { useFilterStore } from "../stores/filters.ts";
-import { useListStore } from "../stores/lists.ts";
+import { type DefaultView, useListStore } from "../stores/lists.ts";
 import { useTagStore } from "../stores/tags.ts";
 import { useTaskStore } from "../stores/tasks.ts";
 import { useUIStore } from "../stores/ui.ts";
@@ -42,7 +45,12 @@ import {
 	parseSmartAdd,
 	type SmartSuggestion,
 } from "../utils/smartAdd.ts";
-import { compareByCompletion } from "../utils/sorting.ts";
+import {
+	compareByCompletion,
+	compareByDueDate,
+	compareByPriority,
+	type SortOrder,
+} from "../utils/sorting.ts";
 
 const listStore = useListStore();
 const taskStore = useTaskStore();
@@ -81,11 +89,7 @@ function updateSmartDropdown() {
 	if (token.prefix === "#") {
 		const tagNames = tagStore.tagsWithCounts.map((t) => t.name);
 		const listNames = listStore.lists.map((l) => l.name);
-		smartSuggestions.value = getTagAndListSuggestions(
-			tagNames,
-			listNames,
-			token.query,
-		);
+		smartSuggestions.value = getTagAndListSuggestions(tagNames, listNames, token.query);
 	} else if (token.prefix === "^") {
 		smartSuggestions.value = getDueSuggestions(token.query);
 	} else if (token.prefix === "!") {
@@ -128,8 +132,7 @@ function handleQuickAddKeydown(e: KeyboardEvent) {
 
 	if (e.key === "ArrowDown") {
 		e.preventDefault();
-		selectedSmartIndex.value =
-			(selectedSmartIndex.value + 1) % smartSuggestions.value.length;
+		selectedSmartIndex.value = (selectedSmartIndex.value + 1) % smartSuggestions.value.length;
 		return;
 	}
 
@@ -171,10 +174,7 @@ function appendSmartPrefix(prefix: string) {
 const activeList = computed(() => listStore.activeList);
 const isView = computed(() => listStore.activeView !== null);
 const hasActiveSelection = computed(
-	() =>
-		!!listStore.activeList ||
-		!!listStore.activeView ||
-		!!filterStore.selectedTag,
+	() => !!listStore.activeList || !!listStore.activeView || !!filterStore.selectedTag,
 );
 
 const viewTitle = computed(() => {
@@ -194,13 +194,36 @@ const headerTitle = computed(() => {
 });
 
 const quickAddPlaceholder = computed(() => {
-	if (filterStore.selectedTag)
-		return `Add a task tagged #${filterStore.selectedTag}...`;
+	if (filterStore.selectedTag) return `Add a task tagged #${filterStore.selectedTag}...`;
 	if (viewTitle.value) return `Add a task to ${viewTitle.value}...`;
-	return activeList.value
-		? `Add a task to ${activeList.value.name}...`
-		: "Add a task...";
+	return activeList.value ? `Add a task to ${activeList.value.name}...` : "Add a task...";
 });
+
+// Tag cache for visible tasks: taskId -> Tag[]
+const taskTagsCache = ref<Map<string, Tag[]>>(new Map());
+const customNewTagName = ref("");
+
+// ---------------------------------------------------------------------------
+// Sort State
+// ---------------------------------------------------------------------------
+type SortFieldOption = "created_at" | "priority" | "due" | "list" | "tags";
+const activeSortField = ref<SortFieldOption | null>(null);
+const activeSortOrder = ref<SortOrder>("asc");
+
+function handleSortClick(field: SortFieldOption) {
+	if (activeSortField.value === field) {
+		if (activeSortOrder.value === "asc") {
+			activeSortOrder.value = "desc";
+		} else {
+			// third click clears back to default order
+			activeSortField.value = null;
+			activeSortOrder.value = "asc";
+		}
+	} else {
+		activeSortField.value = field;
+		activeSortOrder.value = "asc";
+	}
+}
 
 const visibleTasks = computed(() => {
 	// If user is searching, use filteredTasks which handles search across title, description, location, url
@@ -213,8 +236,45 @@ const visibleTasks = computed(() => {
 	// Subtasks belong in parent detail panes, not top-level center-pane list rows
 	const rootTasks = tasks.filter((t) => !t.parent_id);
 
-	// Tasks that are checked off should auto get sorted to the bottom
-	return [...rootTasks].sort((a, b) => compareByCompletion(a, b));
+	const field = activeSortField.value;
+	const order = activeSortOrder.value;
+	const dir = order === "asc" ? 1 : -1;
+
+	// Build list name map once for "by list" sort
+	const listMap = new Map(listStore.lists.map((l) => [l.id, l.name.toLowerCase()]));
+
+	return [...rootTasks].sort((a, b) => {
+		// Completed tasks always sink to bottom
+		const cmpCompletion = compareByCompletion(a, b);
+		if (cmpCompletion !== 0) return cmpCompletion;
+
+		// No user-chosen sort: preserve store order
+		if (!field) return 0;
+
+		if (field === "priority") return compareByPriority(a, b, order);
+		if (field === "due") return compareByDueDate(a, b, order);
+
+		if (field === "created_at") {
+			const ta = a.created_at ?? "";
+			const tb = b.created_at ?? "";
+			return ta < tb ? -dir : ta > tb ? dir : 0;
+		}
+
+		if (field === "list") {
+			const la = listMap.get(a.list_id) ?? "";
+			const lb = listMap.get(b.list_id) ?? "";
+			return la < lb ? -dir : la > lb ? dir : 0;
+		}
+
+		if (field === "tags") {
+			// Sort by first tag name from the tag cache (tasks not yet cached sort last)
+			const ta = taskTagsCache.value.get(a.id)?.[0]?.name?.toLowerCase() ?? "\uFFFF";
+			const tb = taskTagsCache.value.get(b.id)?.[0]?.name?.toLowerCase() ?? "\uFFFF";
+			return ta < tb ? -dir : ta > tb ? dir : 0;
+		}
+
+		return 0;
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -226,10 +286,6 @@ const isBatchOperating = ref(false);
 type DropdownMenu = "select" | "postpone" | "priority" | "list" | "tag" | null;
 const activeDropdown = ref<DropdownMenu>(null);
 const customPostponeDate = ref("");
-
-// Tag cache for visible tasks: taskId -> Tag[]
-const taskTagsCache = ref<Map<string, Tag[]>>(new Map());
-const customNewTagName = ref("");
 
 interface ContextMenuState {
 	visible: boolean;
@@ -340,6 +396,13 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
 		return;
 	}
 
+	// Cmd/Ctrl + N -> Open Quick Capture modal
+	if (isMod && !e.shiftKey && !e.altKey && (e.key === "n" || e.key === "N")) {
+		e.preventDefault();
+		uiStore.toggleCapture(true);
+		return;
+	}
+
 	// Escape -> close menus / modals or escape focus (blur active element)
 	if (e.key === "Escape") {
 		if (contextMenu.value.visible) {
@@ -367,6 +430,11 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
 			uiStore.toggleShortcuts(false);
 			return;
 		}
+		if (uiStore.isCaptureOpen) {
+			e.preventDefault();
+			uiStore.toggleCapture(false);
+			return;
+		}
 		if (uiStore.isImportOpen) {
 			e.preventDefault();
 			uiStore.toggleImport(false);
@@ -374,11 +442,7 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
 		}
 
 		const active = (document.activeElement as HTMLElement | null) || target;
-		if (
-			active &&
-			active !== document.body &&
-			typeof active.blur === "function"
-		) {
+		if (active && active !== document.body && typeof active.blur === "function") {
 			e.preventDefault();
 			active.blur();
 			return;
@@ -393,9 +457,7 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
 			(isMod && !e.shiftKey && (e.key === "f" || e.key === "F"))
 		) {
 			e.preventDefault();
-			const searchInput = document.querySelector<HTMLInputElement>(
-				"input[data-global-search]",
-			);
+			const searchInput = document.querySelector<HTMLInputElement>("input[data-global-search]");
 
 			searchInput?.focus();
 			searchInput?.select();
@@ -410,44 +472,91 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
 			return;
 		}
 
-		// Navigation: Ctrl+Tab / Ctrl+Shift+Tab or j / k or ArrowDown / ArrowUp
-		const isNextShortcut =
-			(e.ctrlKey &&
-				!e.shiftKey &&
-				!e.metaKey &&
-				!e.altKey &&
-				e.key === "Tab") ||
-			((e.key === "j" || e.key === "ArrowDown") &&
-				!e.ctrlKey &&
-				!e.metaKey &&
-				!e.altKey);
-		const isPrevShortcut =
-			(e.ctrlKey && e.shiftKey && !e.metaKey && !e.altKey && e.key === "Tab") ||
-			((e.key === "k" || e.key === "ArrowUp") &&
-				!e.ctrlKey &&
-				!e.metaKey &&
-				!e.altKey);
+		// Ctrl+Tab / Ctrl+Shift+Tab -> navigate between lists and smart views
+		const isNextListShortcut =
+			e.ctrlKey && !e.shiftKey && !e.metaKey && !e.altKey && e.key === "Tab";
+		const isPrevListShortcut =
+			e.ctrlKey && e.shiftKey && !e.metaKey && !e.altKey && e.key === "Tab";
 
-		if (isNextShortcut || isPrevShortcut) {
+		if (isNextListShortcut || isPrevListShortcut) {
+			e.preventDefault();
+			const SMART_VIEW_ORDER: DefaultView[] = [
+				"inbox",
+				"all",
+				"today",
+				"tomorrow",
+				"this_week",
+				"calendar",
+				"trash",
+			];
+			type NavItem =
+				| { type: "home" }
+				| { type: "view"; id: DefaultView }
+				| { type: "list"; id: string };
+			const navItems: NavItem[] = [
+				{ type: "home" },
+				...SMART_VIEW_ORDER.map((id) => ({ type: "view" as const, id })),
+				...listStore.sortedLists.map((l) => ({ type: "list" as const, id: l.id })),
+			];
+			let currentNavIndex: number;
+			if (!listStore.activeListId && !listStore.activeView && !filterStore.selectedTag) {
+				currentNavIndex = 0;
+			} else if (listStore.activeView) {
+				currentNavIndex = navItems.findIndex(
+					(n) => n.type === "view" && n.id === listStore.activeView,
+				);
+			} else if (listStore.activeListId) {
+				currentNavIndex = navItems.findIndex(
+					(n) => n.type === "list" && n.id === listStore.activeListId,
+				);
+			} else {
+				currentNavIndex = 0;
+			}
+			if (currentNavIndex === -1) currentNavIndex = 0;
+			const nextNavIndex = isNextListShortcut
+				? (currentNavIndex + 1) % navItems.length
+				: (currentNavIndex - 1 + navItems.length) % navItems.length;
+			const nextNav = navItems[nextNavIndex];
+			filterStore.setTagFilter(null);
+			if (nextNav.type === "home") {
+				filterStore.setListFilter(null);
+				filterStore.setSmartView(null);
+				listStore.goHome();
+				taskStore.setActiveTask(null);
+			} else if (nextNav.type === "view") {
+				filterStore.setListFilter(null);
+				listStore.setActiveList(null);
+				filterStore.setSmartView(nextNav.id === "calendar" ? null : nextNav.id);
+				listStore.setActiveView(nextNav.id);
+				taskStore.setActiveTask(null);
+			} else {
+				filterStore.setSmartView(null);
+				listStore.setActiveView(null);
+				filterStore.setListFilter(nextNav.id);
+				listStore.setActiveList(nextNav.id);
+				taskStore.setActiveTask(null);
+			}
+			return;
+		}
+
+		// j / k / ArrowDown / ArrowUp -> navigate between tasks
+		const isNextTaskShortcut =
+			(e.key === "j" || e.key === "ArrowDown") && !e.ctrlKey && !e.metaKey && !e.altKey;
+		const isPrevTaskShortcut =
+			(e.key === "k" || e.key === "ArrowUp") && !e.ctrlKey && !e.metaKey && !e.altKey;
+
+		if (isNextTaskShortcut || isPrevTaskShortcut) {
 			const tasks = visibleTasks.value;
 			if (!tasks.length) return;
 			e.preventDefault();
 			const currentId = taskStore.activeTaskId;
-			const currentIndex = currentId
-				? tasks.findIndex((t) => t.id === currentId)
-				: -1;
+			const currentIndex = currentId ? tasks.findIndex((t) => t.id === currentId) : -1;
 
 			let nextIndex: number;
-			if (isNextShortcut) {
-				nextIndex =
-					currentIndex === -1
-						? 0
-						: Math.min(currentIndex + 1, tasks.length - 1);
+			if (isNextTaskShortcut) {
+				nextIndex = currentIndex === -1 ? 0 : Math.min(currentIndex + 1, tasks.length - 1);
 			} else {
-				nextIndex =
-					currentIndex === -1
-						? tasks.length - 1
-						: Math.max(currentIndex - 1, 0);
+				nextIndex = currentIndex === -1 ? tasks.length - 1 : Math.max(currentIndex - 1, 0);
 			}
 
 			const nextTask = tasks[nextIndex];
@@ -461,15 +570,8 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
 			return;
 		}
 
-		// 'Enter' or 'c' -> complete selected task
-		if (
-			(e.key === "Enter" &&
-				!e.ctrlKey &&
-				!e.metaKey &&
-				!e.altKey &&
-				!e.shiftKey) ||
-			(e.key === "c" && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey)
-		) {
+		// 'c' -> complete selected task
+		if (e.key === "c" && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
 			const currentId = taskStore.activeTaskId;
 			if (!currentId) return;
 			e.preventDefault();
@@ -565,9 +667,7 @@ watch(
 // Keep tag cache populated for visible tasks
 async function loadVisibleTaskTags() {
 	const tasks = visibleTasks.value;
-	const missingIds = tasks
-		.map((t) => t.id)
-		.filter((id) => !taskTagsCache.value.has(id));
+	const missingIds = tasks.map((t) => t.id).filter((id) => !taskTagsCache.value.has(id));
 
 	if (!missingIds.length) return;
 
@@ -628,8 +728,7 @@ const allVisibleSelected = computed(() => {
 
 const someVisibleSelected = computed(() => {
 	return (
-		visibleTasks.value.some((t) => selectedTaskIds.value.has(t.id)) &&
-		!allVisibleSelected.value
+		visibleTasks.value.some((t) => selectedTaskIds.value.has(t.id)) && !allVisibleSelected.value
 	);
 });
 
@@ -761,9 +860,7 @@ async function handleBatchAssignTag(tagName: string) {
 	isBatchOperating.value = true;
 	try {
 		// Ensure tag exists in db before assigning (assignTag requires tag to exist)
-		const existingTag = tagStore.tags.find(
-			(t) => t.name.toLowerCase() === trimmed.toLowerCase(),
-		);
+		const existingTag = tagStore.tags.find((t) => t.name.toLowerCase() === trimmed.toLowerCase());
 		const tag = existingTag ?? (await tagStore.createTag(trimmed));
 		await Promise.all(ids.map((id) => assignTag(id, tag.id)));
 		await Promise.all(
@@ -901,8 +998,7 @@ async function handleAddTask() {
 		}
 	}
 	if (!targetListId) {
-		targetListId =
-			activeList.value?.id ?? listStore.inboxList?.id ?? listStore.lists[0]?.id;
+		targetListId = activeList.value?.id ?? listStore.inboxList?.id ?? listStore.lists[0]?.id;
 	}
 	if (!targetListId) return;
 
@@ -1003,697 +1099,949 @@ function formatDue(dateStr: string | null): string {
 </script>
 
 <template>
-  <section class="flex flex-col h-full bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100 select-none overflow-hidden">
-    <!-- Header -->
-    <div class="p-3 sm:p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-2">
-      <div class="flex items-center gap-2.5 min-w-0">
-        <!-- Mobile Drawer Toggle Hamburger -->
-        <button
-          type="button"
-          @click="uiStore.toggleSidebar()"
-          class="md:hidden p-1.5 -ml-1 rounded-md text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer shrink-0"
-          title="Toggle Navigation Sidebar"
-        >
-          <Menu class="w-5 h-5" />
-        </button>
+	<section
+		class="flex flex-col h-full bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100 select-none overflow-hidden"
+	>
+		<!-- Header -->
+		<div
+			class="p-3 sm:p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-2"
+		>
+			<div class="flex items-center gap-2.5 min-w-0">
+				<!-- Mobile Drawer Toggle Hamburger -->
+				<button
+					type="button"
+					@click="uiStore.toggleSidebar()"
+					class="md:hidden p-1.5 -ml-1 rounded-md text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer shrink-0"
+					title="Toggle Navigation Sidebar"
+				>
+					<Menu class="w-5 h-5" />
+				</button>
 
-        <div class="min-w-0">
-          <h2 class="text-lg sm:text-xl font-bold truncate flex items-center gap-2">
-            <!-- Tag Icon or View or List Icon -->
-            <TagIcon
-              v-if="filterStore.selectedTag"
-              class="w-5 h-5 text-emerald-500 shrink-0"
-            />
-            <Inbox
-              v-else-if="(activeList && activeList.name.toLowerCase() === 'inbox') || listStore.activeView === 'inbox'"
-              class="w-5 h-5 text-blue-500 shrink-0"
-            />
-            <CheckSquare
-              v-else-if="listStore.activeView === 'all'"
-              class="w-5 h-5 text-indigo-500 shrink-0"
-            />
-            <Calendar
-              v-else-if="listStore.activeView === 'today'"
-              class="w-5 h-5 text-emerald-500 shrink-0"
-            />
-            <Sunrise
-              v-else-if="listStore.activeView === 'tomorrow'"
-              class="w-5 h-5 text-amber-500 shrink-0"
-            />
-            <CalendarRange
-              v-else-if="listStore.activeView === 'this_week'"
-              class="w-5 h-5 text-purple-500 shrink-0"
-            />
-            <Trash2
-              v-else-if="listStore.activeView === 'trash'"
-              class="w-5 h-5 text-rose-500 shrink-0"
-            />
-            <span
-              v-else-if="activeList"
-              class="w-3 h-3 rounded-full shrink-0 inline-block"
-              :style="{ backgroundColor: activeList.color || '#10b981' }"
-            />
+				<div class="min-w-0">
+					<h2 class="text-lg sm:text-xl font-bold truncate flex items-center gap-2">
+						<!-- Tag Icon or View or List Icon -->
+						<TagIcon v-if="filterStore.selectedTag" class="w-5 h-5 text-emerald-500 shrink-0" />
+						<Inbox
+							v-else-if="
+								(activeList && activeList.name.toLowerCase() === 'inbox') ||
+								listStore.activeView === 'inbox'
+							"
+							class="w-5 h-5 text-blue-500 shrink-0"
+						/>
+						<CheckSquare
+							v-else-if="listStore.activeView === 'all'"
+							class="w-5 h-5 text-indigo-500 shrink-0"
+						/>
+						<Calendar
+							v-else-if="listStore.activeView === 'today'"
+							class="w-5 h-5 text-emerald-500 shrink-0"
+						/>
+						<Sunrise
+							v-else-if="listStore.activeView === 'tomorrow'"
+							class="w-5 h-5 text-amber-500 shrink-0"
+						/>
+						<CalendarRange
+							v-else-if="listStore.activeView === 'this_week'"
+							class="w-5 h-5 text-purple-500 shrink-0"
+						/>
+						<Trash2
+							v-else-if="listStore.activeView === 'trash'"
+							class="w-5 h-5 text-rose-500 shrink-0"
+						/>
+						<span
+							v-else-if="activeList"
+							class="w-3 h-3 rounded-full shrink-0 inline-block"
+							:style="{ backgroundColor: activeList.color || '#10b981' }"
+						/>
 
-            <span>{{ headerTitle }}</span>
-          </h2>
-          <p v-if="hasActiveSelection" class="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            {{ taskStore.incompleteTasks.length }} pending, {{ taskStore.completedTasks.length }} completed
-          </p>
-        </div>
-      </div>
+						<span>{{ headerTitle }}</span>
+					</h2>
+					<p v-if="hasActiveSelection" class="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+						{{ taskStore.incompleteTasks.length }} pending,
+						{{ taskStore.completedTasks.length }} completed
+					</p>
+				</div>
+			</div>
 
-      <!-- Right actions: Completed filter toggle + Detail panel toggle -->
-      <div class="flex items-center gap-1.5 shrink-0">
-        <button
-          v-if="hasActiveSelection"
-          type="button"
-          @click="() => { const next = !taskStore.includeCompleted; taskStore.setIncludeCompleted(next); filterStore.setIncludeCompleted(next); }"
-          class="flex items-center gap-1 text-xs px-2 sm:px-2.5 py-1 rounded-md border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-600 dark:text-zinc-300 cursor-pointer"
-          :title="taskStore.includeCompleted ? 'Hide completed tasks' : 'Show completed tasks'"
-        >
-          <ListFilter class="w-3.5 h-3.5" />
-          <span class="hidden sm:inline">{{ taskStore.includeCompleted ? 'Showing all' : 'Active only' }}</span>
-        </button>
+			<!-- Right actions: Completed filter toggle + Detail panel toggle -->
+			<div class="flex items-center gap-1.5 shrink-0">
+				<button
+					v-if="hasActiveSelection"
+					type="button"
+					@click="
+						() => {
+							const next = !taskStore.includeCompleted;
+							taskStore.setIncludeCompleted(next);
+							filterStore.setIncludeCompleted(next);
+						}
+					"
+					class="flex items-center gap-1 text-xs px-2 sm:px-2.5 py-1 rounded-md border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-600 dark:text-zinc-300 cursor-pointer"
+					:title="taskStore.includeCompleted ? 'Hide completed tasks' : 'Show completed tasks'"
+				>
+					<ListFilter class="w-3.5 h-3.5" />
+					<span class="hidden sm:inline">{{
+						taskStore.includeCompleted ? "Showing all" : "Active only"
+					}}</span>
+				</button>
 
-        <!-- Toggle Right Detail Pane -->
-        <button
-          type="button"
-          @click="uiStore.toggleDetail()"
-          :title="uiStore.isDetailOpen ? 'Collapse task details' : 'Expand task details'"
-          class="p-1 sm:p-1.5 rounded-md border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 transition-colors cursor-pointer"
-        >
-          <PanelRightClose v-if="uiStore.isDetailOpen" class="w-4 h-4" />
-          <PanelRight v-else class="w-4 h-4" />
-        </button>
-      </div>
-    </div>
+				<!-- Toggle Right Detail Pane -->
+				<button
+					type="button"
+					@click="uiStore.toggleDetail()"
+					:title="uiStore.isDetailOpen ? 'Collapse task details' : 'Expand task details'"
+					class="p-1 sm:p-1.5 rounded-md border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 transition-colors cursor-pointer"
+				>
+					<PanelRightClose v-if="uiStore.isDetailOpen" class="w-4 h-4" />
+					<PanelRight v-else class="w-4 h-4" />
+				</button>
+			</div>
+		</div>
 
-    <!-- Batch Action Toolbar (When tasks are available or selected) -->
-    <div
-      v-if="hasActiveSelection && visibleTasks.length > 0"
-      class="px-3 py-1.5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/90 flex flex-wrap items-center justify-between gap-2 text-xs"
-    >
-      <div class="flex items-center gap-1.5 flex-wrap">
-        <!-- Multi-select checkbox dropdown (Select All / None / Invert) -->
-        <div class="relative" data-dropdown-container>
-          <button
-            type="button"
-            @click="toggleDropdown('select')"
-            class="flex items-center gap-1 px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer"
-            title="Selection menu"
-          >
-            <CheckSquare v-if="allVisibleSelected" class="w-3.5 h-3.5 text-emerald-600" />
-            <MinusSquare v-else-if="someVisibleSelected" class="w-3.5 h-3.5 text-emerald-600" />
-            <Square v-else class="w-3.5 h-3.5 text-zinc-400" />
-            <ChevronDown class="w-3 h-3 opacity-60" />
-          </button>
+		<!-- Sort Controls Toolbar -->
+		<div
+			v-if="hasActiveSelection"
+			class="px-3 py-1.5 border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2 text-xs overflow-x-auto"
+		>
+			<span class="shrink-0 text-zinc-400 dark:text-zinc-500 font-medium select-none">Sort:</span>
+			<div class="flex items-center gap-1 flex-wrap">
+				<button
+					v-for="opt in [
+						{ field: 'created_at', label: 'Created' },
+						{ field: 'priority', label: 'Priority' },
+						{ field: 'due', label: 'Due Date' },
+						{ field: 'list', label: 'List', listOnly: true },
+						{ field: 'tags', label: 'Tags' },
+					] as { field: SortFieldOption; label: string; listOnly?: boolean }[]"
+					:key="opt.field"
+					v-show="!opt.listOnly || !listStore.activeListId"
+					type="button"
+					@click="handleSortClick(opt.field)"
+					:class="[
+						'flex items-center gap-0.5 px-2 py-0.5 rounded-full border transition-colors cursor-pointer select-none',
+						activeSortField === opt.field
+							? 'border-indigo-400 bg-indigo-50 text-indigo-700 dark:border-indigo-500 dark:bg-indigo-950/60 dark:text-indigo-300'
+							: 'border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:border-zinc-300 dark:hover:border-zinc-600 hover:text-zinc-700 dark:hover:text-zinc-200',
+					]"
+				>
+					{{ opt.label }}
+					<ArrowUp
+						v-if="activeSortField === opt.field && activeSortOrder === 'asc'"
+						class="w-3 h-3"
+					/>
+					<ArrowDown
+						v-else-if="activeSortField === opt.field && activeSortOrder === 'desc'"
+						class="w-3 h-3"
+					/>
+				</button>
+			</div>
+		</div>
 
-          <!-- Dropdown menu -->
-          <div
-            v-if="activeDropdown === 'select'"
-            class="absolute left-0 top-full mt-1 w-36 py-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md shadow-lg z-30 space-y-0.5"
-          >
-            <button
-              type="button"
-              @click="selectAll"
-              class="w-full text-left px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 cursor-pointer"
-            >
-              Select All
-            </button>
-            <button
-              type="button"
-              @click="selectNone"
-              class="w-full text-left px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 cursor-pointer"
-            >
-              Select None
-            </button>
-            <button
-              type="button"
-              @click="selectInvert"
-              class="w-full text-left px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 cursor-pointer"
-            >
-              Invert Selection
-            </button>
-          </div>
-        </div>
+		<!-- Batch Action Toolbar (When tasks are available or selected) -->
+		<div
+			v-if="hasActiveSelection && visibleTasks.length > 0"
+			class="px-3 py-1.5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/90 flex flex-wrap items-center justify-between gap-2 text-xs"
+		>
+			<div class="flex items-center gap-1.5 flex-wrap">
+				<!-- Multi-select checkbox dropdown (Select All / None / Invert) -->
+				<div class="relative" data-dropdown-container>
+					<button
+						type="button"
+						@click="toggleDropdown('select')"
+						class="flex items-center gap-1 px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer"
+						title="Selection menu"
+					>
+						<CheckSquare v-if="allVisibleSelected" class="w-3.5 h-3.5 text-emerald-600" />
+						<MinusSquare v-else-if="someVisibleSelected" class="w-3.5 h-3.5 text-emerald-600" />
+						<Square v-else class="w-3.5 h-3.5 text-zinc-400" />
+						<ChevronDown class="w-3 h-3 opacity-60" />
+					</button>
 
-        <!-- Selected count label -->
-        <span v-if="selectedTaskIds.size > 0" class="text-zinc-500 dark:text-zinc-400 font-medium px-1">
-          {{ selectedTaskIds.size }} selected
-        </span>
+					<!-- Dropdown menu -->
+					<div
+						v-if="activeDropdown === 'select'"
+						class="absolute left-0 top-full mt-1 w-36 py-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md shadow-lg z-30 space-y-0.5"
+					>
+						<button
+							type="button"
+							@click="selectAll"
+							class="w-full text-left px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 cursor-pointer"
+						>
+							Select All
+						</button>
+						<button
+							type="button"
+							@click="selectNone"
+							class="w-full text-left px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 cursor-pointer"
+						>
+							Select None
+						</button>
+						<button
+							type="button"
+							@click="selectInvert"
+							class="w-full text-left px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 cursor-pointer"
+						>
+							Invert Selection
+						</button>
+					</div>
+				</div>
 
-        <!-- Action buttons (active only when >= 1 task selected) -->
-        <template v-if="selectedTaskIds.size > 0">
-          <!-- Mark Completed (✓) -->
-          <button
-            type="button"
-            @click="handleBatchComplete"
-            :disabled="isBatchOperating"
-            class="flex items-center gap-1 px-2 py-1 rounded bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors cursor-pointer disabled:opacity-50"
-            title="Mark selected completed"
-          >
-            <Check class="w-3.5 h-3.5" />
-            <span>Complete</span>
-          </button>
+				<!-- Selected count label -->
+				<span
+					v-if="selectedTaskIds.size > 0"
+					class="text-zinc-500 dark:text-zinc-400 font-medium px-1"
+				>
+					{{ selectedTaskIds.size }} selected
+				</span>
 
-          <!-- Postpone Menu (📅 ▾) -->
-          <div class="relative" data-dropdown-container>
-            <button
-              type="button"
-              @click="toggleDropdown('postpone')"
-              :disabled="isBatchOperating"
-              class="flex items-center gap-1 px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer disabled:opacity-50"
-              title="Postpone due date"
-            >
-              <CalendarPlus class="w-3.5 h-3.5 text-blue-500" />
-              <span>Postpone</span>
-              <ChevronDown class="w-3 h-3 opacity-60" />
-            </button>
+				<!-- Action buttons (active only when >= 1 task selected) -->
+				<template v-if="selectedTaskIds.size > 0">
+					<!-- Mark Completed (✓) -->
+					<button
+						type="button"
+						@click="handleBatchComplete"
+						:disabled="isBatchOperating"
+						class="flex items-center gap-1 px-2 py-1 rounded bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors cursor-pointer disabled:opacity-50"
+						title="Mark selected completed"
+					>
+						<Check class="w-3.5 h-3.5" />
+						<span>Complete</span>
+					</button>
 
-            <div
-              v-if="activeDropdown === 'postpone'"
-              class="absolute left-0 top-full mt-1 w-44 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md shadow-lg z-30 text-xs space-y-1"
-            >
-              <button
-                type="button"
-                @click="handleBatchPostpone(1)"
-                class="w-full text-left px-3 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 cursor-pointer"
-              >
-                +1 Day (Tomorrow)
-              </button>
-              <button
-                type="button"
-                @click="handleBatchPostpone(2)"
-                class="w-full text-left px-3 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 cursor-pointer"
-              >
-                +2 Days
-              </button>
-              <button
-                type="button"
-                @click="handleBatchPostpone(7)"
-                class="w-full text-left px-3 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 cursor-pointer"
-              >
-                +1 Week
-              </button>
-              <div class="border-t border-zinc-100 dark:border-zinc-800 pt-1 px-3">
-                <label class="block text-[10px] text-zinc-400 mb-0.5">Custom Date</label>
-                <div class="flex items-center gap-1">
-                  <input
-                    type="date"
-                    v-model="customPostponeDate"
-                    class="w-full px-1.5 py-0.5 border border-zinc-200 dark:border-zinc-700 rounded text-xs bg-white dark:bg-zinc-950 text-zinc-800 dark:text-zinc-200"
-                  />
-                  <button
-                    type="button"
-                    @click="handleBatchCustomDate"
-                    :disabled="!customPostponeDate"
-                    class="px-1.5 py-0.5 bg-emerald-600 text-white rounded text-[10px] cursor-pointer disabled:opacity-40"
-                  >
-                    Set
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+					<!-- Postpone Menu (📅 ▾) -->
+					<div class="relative" data-dropdown-container>
+						<button
+							type="button"
+							@click="toggleDropdown('postpone')"
+							:disabled="isBatchOperating"
+							class="flex items-center gap-1 px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer disabled:opacity-50"
+							title="Postpone due date"
+						>
+							<CalendarPlus class="w-3.5 h-3.5 text-blue-500" />
+							<span>Postpone</span>
+							<ChevronDown class="w-3 h-3 opacity-60" />
+						</button>
 
-          <!-- Set Priority Menu (! ▾) -->
-          <div class="relative" data-dropdown-container>
-            <button
-              type="button"
-              @click="toggleDropdown('priority')"
-              :disabled="isBatchOperating"
-              class="flex items-center gap-1 px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer disabled:opacity-50"
-              title="Set priority"
-            >
-              <AlertCircle class="w-3.5 h-3.5 text-amber-500" />
-              <span>Priority</span>
-              <ChevronDown class="w-3 h-3 opacity-60" />
-            </button>
+						<div
+							v-if="activeDropdown === 'postpone'"
+							class="absolute left-0 top-full mt-1 w-44 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md shadow-lg z-30 text-xs space-y-1"
+						>
+							<button
+								type="button"
+								@click="handleBatchPostpone(1)"
+								class="w-full text-left px-3 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 cursor-pointer"
+							>
+								+1 Day (Tomorrow)
+							</button>
+							<button
+								type="button"
+								@click="handleBatchPostpone(2)"
+								class="w-full text-left px-3 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 cursor-pointer"
+							>
+								+2 Days
+							</button>
+							<button
+								type="button"
+								@click="handleBatchPostpone(7)"
+								class="w-full text-left px-3 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 cursor-pointer"
+							>
+								+1 Week
+							</button>
+							<div class="border-t border-zinc-100 dark:border-zinc-800 pt-1 px-3">
+								<label class="block text-[10px] text-zinc-400 mb-0.5">Custom Date</label>
+								<div class="flex items-center gap-1">
+									<input
+										type="date"
+										v-model="customPostponeDate"
+										class="w-full px-1.5 py-0.5 border border-zinc-200 dark:border-zinc-700 rounded text-xs bg-white dark:bg-zinc-950 text-zinc-800 dark:text-zinc-200"
+									/>
+									<button
+										type="button"
+										@click="handleBatchCustomDate"
+										:disabled="!customPostponeDate"
+										class="px-1.5 py-0.5 bg-emerald-600 text-white rounded text-[10px] cursor-pointer disabled:opacity-40"
+									>
+										Set
+									</button>
+								</div>
+							</div>
+						</div>
+					</div>
 
-            <div
-              v-if="activeDropdown === 'priority'"
-              class="absolute left-0 top-full mt-1 w-36 py-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md shadow-lg z-30 text-xs space-y-0.5"
-            >
-              <button
-                type="button"
-                @click="handleBatchSetPriority(PRIORITY.HIGH)"
-                class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-red-600 dark:text-red-400 font-medium cursor-pointer"
-              >
-                <span>Priority 1</span>
-                <span class="text-[10px] px-1 rounded bg-red-100 dark:bg-red-950">P1</span>
-              </button>
-              <button
-                type="button"
-                @click="handleBatchSetPriority(PRIORITY.MEDIUM)"
-                class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-amber-600 dark:text-amber-400 font-medium cursor-pointer"
-              >
-                <span>Priority 2</span>
-                <span class="text-[10px] px-1 rounded bg-amber-100 dark:bg-amber-950">P2</span>
-              </button>
-              <button
-                type="button"
-                @click="handleBatchSetPriority(PRIORITY.LOW)"
-                class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-blue-600 dark:text-blue-400 font-medium cursor-pointer"
-              >
-                <span>Priority 3</span>
-                <span class="text-[10px] px-1 rounded bg-blue-100 dark:bg-blue-950">P3</span>
-              </button>
-              <div class="border-t border-zinc-100 dark:border-zinc-800 my-1"></div>
-              <button
-                type="button"
-                @click="handleBatchSetPriority(null)"
-                class="w-full text-left px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 cursor-pointer"
-              >
-                None
-              </button>
-            </div>
-          </div>
+					<!-- Set Priority Menu (! ▾) -->
+					<div class="relative" data-dropdown-container>
+						<button
+							type="button"
+							@click="toggleDropdown('priority')"
+							:disabled="isBatchOperating"
+							class="flex items-center gap-1 px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer disabled:opacity-50"
+							title="Set priority"
+						>
+							<AlertCircle class="w-3.5 h-3.5 text-amber-500" />
+							<span>Priority</span>
+							<ChevronDown class="w-3 h-3 opacity-60" />
+						</button>
 
-          <!-- Move to List (📋 ▾) -->
-          <div class="relative" data-dropdown-container>
-            <button
-              type="button"
-              @click="toggleDropdown('list')"
-              :disabled="isBatchOperating"
-              class="flex items-center gap-1 px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer disabled:opacity-50"
-              title="Move to list"
-            >
-              <FolderInput class="w-3.5 h-3.5 text-indigo-500" />
-              <span>List</span>
-              <ChevronDown class="w-3 h-3 opacity-60" />
-            </button>
+						<div
+							v-if="activeDropdown === 'priority'"
+							class="absolute left-0 top-full mt-1 w-36 py-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md shadow-lg z-30 text-xs space-y-0.5"
+						>
+							<button
+								type="button"
+								@click="handleBatchSetPriority(PRIORITY.HIGH)"
+								class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-red-600 dark:text-red-400 font-medium cursor-pointer"
+							>
+								<span>Priority 1</span>
+								<span class="text-[10px] px-1 rounded bg-red-100 dark:bg-red-950">P1</span>
+							</button>
+							<button
+								type="button"
+								@click="handleBatchSetPriority(PRIORITY.MEDIUM)"
+								class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-amber-600 dark:text-amber-400 font-medium cursor-pointer"
+							>
+								<span>Priority 2</span>
+								<span class="text-[10px] px-1 rounded bg-amber-100 dark:bg-amber-950">P2</span>
+							</button>
+							<button
+								type="button"
+								@click="handleBatchSetPriority(PRIORITY.LOW)"
+								class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-blue-600 dark:text-blue-400 font-medium cursor-pointer"
+							>
+								<span>Priority 3</span>
+								<span class="text-[10px] px-1 rounded bg-blue-100 dark:bg-blue-950">P3</span>
+							</button>
+							<div class="border-t border-zinc-100 dark:border-zinc-800 my-1"></div>
+							<button
+								type="button"
+								@click="handleBatchSetPriority(null)"
+								class="w-full text-left px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 cursor-pointer"
+							>
+								None
+							</button>
+						</div>
+					</div>
 
-            <div
-              v-if="activeDropdown === 'list'"
-              class="absolute left-0 top-full mt-1 w-44 py-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md shadow-lg z-30 text-xs max-h-48 overflow-y-auto space-y-0.5"
-            >
-              <button
-                v-for="list in listStore.lists"
-                :key="list.id"
-                type="button"
-                @click="handleBatchMoveToList(list.id)"
-                class="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 text-left cursor-pointer"
-              >
-                <span
-                  class="w-2 h-2 rounded-full shrink-0"
-                  :style="{ backgroundColor: list.color || '#10b981' }"
-                />
-                <span class="truncate">{{ list.name }}</span>
-              </button>
-            </div>
-          </div>
+					<!-- Move to List (📋 ▾) -->
+					<div class="relative" data-dropdown-container>
+						<button
+							type="button"
+							@click="toggleDropdown('list')"
+							:disabled="isBatchOperating"
+							class="flex items-center gap-1 px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer disabled:opacity-50"
+							title="Move to list"
+						>
+							<FolderInput class="w-3.5 h-3.5 text-indigo-500" />
+							<span>List</span>
+							<ChevronDown class="w-3 h-3 opacity-60" />
+						</button>
 
-          <!-- Add/Remove Tags (🏷 ▾) -->
-          <div class="relative" data-dropdown-container>
-            <button
-              type="button"
-              @click="toggleDropdown('tag')"
-              :disabled="isBatchOperating"
-              class="flex items-center gap-1 px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer disabled:opacity-50"
-              title="Tags"
-            >
-              <Tags class="w-3.5 h-3.5 text-purple-500" />
-              <span>Tags</span>
-              <ChevronDown class="w-3 h-3 opacity-60" />
-            </button>
+						<div
+							v-if="activeDropdown === 'list'"
+							class="absolute left-0 top-full mt-1 w-44 py-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md shadow-lg z-30 text-xs max-h-48 overflow-y-auto space-y-0.5"
+						>
+							<button
+								v-for="list in listStore.lists"
+								:key="list.id"
+								type="button"
+								@click="handleBatchMoveToList(list.id)"
+								class="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 text-left cursor-pointer"
+							>
+								<span
+									class="w-2 h-2 rounded-full shrink-0"
+									:style="{ backgroundColor: list.color || '#10b981' }"
+								/>
+								<span class="truncate">{{ list.name }}</span>
+							</button>
+						</div>
+					</div>
 
-            <div
-              v-if="activeDropdown === 'tag'"
-              class="absolute left-0 top-full mt-1 w-52 p-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md shadow-lg z-30 text-xs space-y-2"
-            >
-              <div class="flex items-center gap-1">
-                <input
-                  type="text"
-                  v-model="customNewTagName"
-                  placeholder="Tag name..."
-                  @keyup.enter="handleBatchAssignTag(customNewTagName)"
-                  class="w-full px-2 py-1 border border-zinc-200 dark:border-zinc-700 rounded text-xs bg-white dark:bg-zinc-950 text-zinc-800 dark:text-zinc-200"
-                />
-                <button
-                  type="button"
-                  @click="handleBatchAssignTag(customNewTagName)"
-                  :disabled="!customNewTagName.trim()"
-                  class="px-2 py-1 bg-emerald-600 text-white rounded text-xs cursor-pointer disabled:opacity-40"
-                >
-                  Add
-                </button>
-              </div>
+					<!-- Add/Remove Tags (🏷 ▾) -->
+					<div class="relative" data-dropdown-container>
+						<button
+							type="button"
+							@click="toggleDropdown('tag')"
+							:disabled="isBatchOperating"
+							class="flex items-center gap-1 px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer disabled:opacity-50"
+							title="Tags"
+						>
+							<Tags class="w-3.5 h-3.5 text-purple-500" />
+							<span>Tags</span>
+							<ChevronDown class="w-3 h-3 opacity-60" />
+						</button>
 
-              <div v-if="tagStore.tagsWithCounts.length > 0" class="border-t border-zinc-100 dark:border-zinc-800 pt-1.5 max-h-36 overflow-y-auto space-y-1">
-                <div class="text-[10px] uppercase font-semibold text-zinc-400">Existing tags</div>
-                <div
-                  v-for="tag in tagStore.tagsWithCounts"
-                  :key="tag.id"
-                  class="flex items-center justify-between gap-1 px-1.5 py-0.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                >
-                  <span class="truncate text-zinc-700 dark:text-zinc-300">#{{ tag.name }}</span>
-                  <div class="flex items-center gap-1 shrink-0">
-                    <button
-                      type="button"
-                      @click="handleBatchAssignTag(tag.name)"
-                      class="px-1.5 py-0.2 rounded bg-emerald-50 dark:bg-emerald-950 text-emerald-600 text-[10px] hover:bg-emerald-100 cursor-pointer"
-                    >
-                      +
-                    </button>
-                    <button
-                      type="button"
-                      @click="handleBatchRemoveTag(tag.name)"
-                      class="px-1.5 py-0.2 rounded bg-rose-50 dark:bg-rose-950 text-rose-600 text-[10px] hover:bg-rose-100 cursor-pointer"
-                    >
-                      -
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+						<div
+							v-if="activeDropdown === 'tag'"
+							class="absolute left-0 top-full mt-1 w-52 p-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md shadow-lg z-30 text-xs space-y-2"
+						>
+							<div class="flex items-center gap-1">
+								<input
+									type="text"
+									v-model="customNewTagName"
+									placeholder="Tag name..."
+									@keyup.enter="handleBatchAssignTag(customNewTagName)"
+									class="w-full px-2 py-1 border border-zinc-200 dark:border-zinc-700 rounded text-xs bg-white dark:bg-zinc-950 text-zinc-800 dark:text-zinc-200"
+								/>
+								<button
+									type="button"
+									@click="handleBatchAssignTag(customNewTagName)"
+									:disabled="!customNewTagName.trim()"
+									class="px-2 py-1 bg-emerald-600 text-white rounded text-xs cursor-pointer disabled:opacity-40"
+								>
+									Add
+								</button>
+							</div>
 
-          <!-- Delete / Move to Trash -->
-          <button
-            type="button"
-            @click="handleBatchDelete"
-            :disabled="isBatchOperating"
-            class="flex items-center gap-1 px-2 py-1 rounded border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-900/50 transition-colors cursor-pointer disabled:opacity-50"
-            title="Delete selected tasks"
-          >
-            <Trash2 class="w-3.5 h-3.5" />
-            <span>Delete</span>
-          </button>
-        </template>
-      </div>
-    </div>
+							<div
+								v-if="tagStore.tagsWithCounts.length > 0"
+								class="border-t border-zinc-100 dark:border-zinc-800 pt-1.5 max-h-36 overflow-y-auto space-y-1"
+							>
+								<div class="text-[10px] uppercase font-semibold text-zinc-400">Existing tags</div>
+								<div
+									v-for="tag in tagStore.tagsWithCounts"
+									:key="tag.id"
+									class="flex items-center justify-between gap-1 px-1.5 py-0.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800"
+								>
+									<span class="truncate text-zinc-700 dark:text-zinc-300">#{{ tag.name }}</span>
+									<div class="flex items-center gap-1 shrink-0">
+										<button
+											type="button"
+											@click="handleBatchAssignTag(tag.name)"
+											class="px-1.5 py-0.2 rounded bg-emerald-50 dark:bg-emerald-950 text-emerald-600 text-[10px] hover:bg-emerald-100 cursor-pointer"
+										>
+											+
+										</button>
+										<button
+											type="button"
+											@click="handleBatchRemoveTag(tag.name)"
+											class="px-1.5 py-0.2 rounded bg-rose-50 dark:bg-rose-950 text-rose-600 text-[10px] hover:bg-rose-100 cursor-pointer"
+										>
+											-
+										</button>
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
 
-    <!-- Quick Add Input & Smart Add Dropdown -->
-    <div v-if="hasActiveSelection" class="p-3 border-b border-zinc-100 dark:border-zinc-800/60 bg-zinc-50/50 dark:bg-zinc-900/50 relative">
-      <form @submit.prevent="handleAddTask" class="relative flex items-center">
-        <input
-          ref="quickAddInputRef"
-          v-model="newTaskTitle"
-          @input="updateSmartDropdown"
-          @click="updateSmartDropdown"
-          @keydown="handleQuickAddKeydown"
-          type="text"
-          data-quick-add-input
-          :placeholder="quickAddPlaceholder"
-          :disabled="isAdding"
-          class="w-full pl-3 pr-10 py-2 text-sm rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-hidden focus:ring-1 focus:ring-emerald-500 shadow-2xs"
-        />
-        <button
-          type="submit"
-          :disabled="isAdding || !newTaskTitle.trim()"
-          class="absolute right-2 p-1 text-zinc-400 hover:text-emerald-600 disabled:opacity-30 disabled:hover:text-zinc-400 transition-colors cursor-pointer"
-          title="Add task"
-        >
-          <CornerDownLeft class="w-4 h-4" />
-        </button>
-      </form>
+					<!-- Delete / Move to Trash -->
+					<button
+						type="button"
+						@click="handleBatchDelete"
+						:disabled="isBatchOperating"
+						class="flex items-center gap-1 px-2 py-1 rounded border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-900/50 transition-colors cursor-pointer disabled:opacity-50"
+						title="Delete selected tasks"
+					>
+						<Trash2 class="w-3.5 h-3.5" />
+						<span>Delete</span>
+					</button>
+				</template>
+			</div>
+		</div>
 
-      <!-- Smart Add Suggestions Dropdown -->
-      <div
-        v-if="isSmartMenuOpen && smartSuggestions.length > 0"
-        class="absolute left-3 right-3 top-full mt-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-xl z-40 max-h-60 overflow-y-auto py-1 animate-in fade-in zoom-in-95 duration-100"
-      >
-        <div class="px-2 py-1 text-[11px] font-semibold text-zinc-400 uppercase tracking-wider flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800">
-          <span v-if="activeSmartToken?.prefix === '#'">Tags & Lists (#)</span>
-          <span v-else-if="activeSmartToken?.prefix === '^'">Due Dates (^)</span>
-          <span v-else-if="activeSmartToken?.prefix === '!'">Priority (!)</span>
-          <span class="text-[10px] font-normal normal-case text-zinc-400">↑↓ to navigate, Enter or Tab to pick</span>
-        </div>
-        <div class="p-1 space-y-0.5">
-          <button
-            v-for="(item, idx) in smartSuggestions"
-            :key="item.label + idx"
-            type="button"
-            @mousedown.prevent="selectSmartSuggestion(item)"
-            :class="[
-              'w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs text-left cursor-pointer transition-colors',
-              idx === selectedSmartIndex
-                ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-200 font-medium'
-                : 'hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300',
-            ]"
-          >
-            <div class="flex items-center gap-2 min-w-0">
-              <!-- Icon for suggestion type -->
-              <TagIcon
-                v-if="item.type === 'tag'"
-                class="w-3.5 h-3.5 text-purple-500 shrink-0"
-              />
-              <FolderInput
-                v-else-if="item.type === 'list'"
-                class="w-3.5 h-3.5 text-emerald-500 shrink-0"
-              />
-              <Calendar
-                v-else-if="item.type === 'due'"
-                class="w-3.5 h-3.5 text-blue-500 shrink-0"
-              />
-              <Flag
-                v-else-if="item.type === 'priority'"
-                :class="[
-                  'w-3.5 h-3.5 shrink-0',
-                  item.insertValue === '1' ? 'text-red-500' :
-                  item.insertValue === '2' ? 'text-amber-500' :
-                  item.insertValue === '3' ? 'text-blue-500' : 'text-zinc-400'
-                ]"
-              />
-              <span class="truncate">{{ item.label }}</span>
-              <span
-                v-if="item.description"
-                class="text-[10px] text-zinc-400 truncate"
-              >
-                {{ item.description }}
-              </span>
-            </div>
-            <span
-              v-if="item.badge"
-              class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 shrink-0 ml-2"
-            >
-              {{ item.badge }}
-            </span>
-          </button>
-        </div>
-      </div>
+		<!-- Quick Add Input & Smart Add Dropdown -->
+		<div
+			v-if="hasActiveSelection"
+			class="p-3 border-b border-zinc-100 dark:border-zinc-800/60 bg-zinc-50/50 dark:bg-zinc-900/50 relative"
+		>
+			<form @submit.prevent="handleAddTask" class="relative flex items-center">
+				<input
+					ref="quickAddInputRef"
+					v-model="newTaskTitle"
+					@input="updateSmartDropdown"
+					@click="updateSmartDropdown"
+					@keydown="handleQuickAddKeydown"
+					type="text"
+					data-quick-add-input
+					:placeholder="quickAddPlaceholder"
+					:disabled="isAdding"
+					class="w-full pl-3 pr-10 py-2 text-sm rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-hidden focus:ring-1 focus:ring-emerald-500 shadow-2xs"
+				/>
+				<button
+					type="submit"
+					:disabled="isAdding || !newTaskTitle.trim()"
+					class="absolute right-2 p-1 text-zinc-400 hover:text-emerald-600 disabled:opacity-30 disabled:hover:text-zinc-400 transition-colors cursor-pointer"
+					title="Add task"
+				>
+					<CornerDownLeft class="w-4 h-4" />
+				</button>
+			</form>
 
-      <!-- Quick Shortcut Hints Toolbar below input -->
-      <div class="flex items-center gap-2 mt-1.5 text-[11px] text-zinc-400 dark:text-zinc-500 select-none">
-        <span class="text-[10px] uppercase font-semibold tracking-wider text-zinc-400/80">Shortcuts:</span>
-        <button
-          type="button"
-          @click="appendSmartPrefix('#')"
-          class="hover:text-purple-600 dark:hover:text-purple-400 font-mono flex items-center gap-0.5 cursor-pointer"
-          title="Add tag or list"
-        >
-          <span class="font-bold">#</span>tag
-        </button>
-        <span>•</span>
-        <button
-          type="button"
-          @click="appendSmartPrefix('^')"
-          class="hover:text-blue-600 dark:hover:text-blue-400 font-mono flex items-center gap-0.5 cursor-pointer"
-          title="Add due date"
-        >
-          <span class="font-bold">^</span>due
-        </button>
-        <span>•</span>
-        <button
-          type="button"
-          @click="appendSmartPrefix('!')"
-          class="hover:text-red-600 dark:hover:text-red-400 font-mono flex items-center gap-0.5 cursor-pointer"
-          title="Set priority (1, 2, 3)"
-        >
-          <span class="font-bold">!</span>priority
-        </button>
-      </div>
-    </div>
+			<!-- Smart Add Suggestions Dropdown -->
+			<div
+				v-if="isSmartMenuOpen && smartSuggestions.length > 0"
+				class="absolute left-3 right-3 top-full mt-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-xl z-40 max-h-60 overflow-y-auto py-1 animate-in fade-in zoom-in-95 duration-100"
+			>
+				<div
+					class="px-2 py-1 text-[11px] font-semibold text-zinc-400 uppercase tracking-wider flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800"
+				>
+					<span v-if="activeSmartToken?.prefix === '#'">Tags & Lists (#)</span>
+					<span v-else-if="activeSmartToken?.prefix === '^'">Due Dates (^)</span>
+					<span v-else-if="activeSmartToken?.prefix === '!'">Priority (!)</span>
+					<span class="text-[10px] font-normal normal-case text-zinc-400"
+						>↑↓ to navigate, Enter or Tab to pick</span
+					>
+				</div>
+				<div class="p-1 space-y-0.5">
+					<button
+						v-for="(item, idx) in smartSuggestions"
+						:key="item.label + idx"
+						type="button"
+						@mousedown.prevent="selectSmartSuggestion(item)"
+						:class="[
+							'w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs text-left cursor-pointer transition-colors',
+							idx === selectedSmartIndex
+								? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-200 font-medium'
+								: 'hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300',
+						]"
+					>
+						<div class="flex items-center gap-2 min-w-0">
+							<!-- Icon for suggestion type -->
+							<TagIcon v-if="item.type === 'tag'" class="w-3.5 h-3.5 text-purple-500 shrink-0" />
+							<FolderInput
+								v-else-if="item.type === 'list'"
+								class="w-3.5 h-3.5 text-emerald-500 shrink-0"
+							/>
+							<Calendar
+								v-else-if="item.type === 'due'"
+								class="w-3.5 h-3.5 text-blue-500 shrink-0"
+							/>
+							<Flag
+								v-else-if="item.type === 'priority'"
+								:class="[
+									'w-3.5 h-3.5 shrink-0',
+									item.insertValue === '1'
+										? 'text-red-500'
+										: item.insertValue === '2'
+											? 'text-amber-500'
+											: item.insertValue === '3'
+												? 'text-blue-500'
+												: 'text-zinc-400',
+								]"
+							/>
+							<span class="truncate">{{ item.label }}</span>
+							<span v-if="item.description" class="text-[10px] text-zinc-400 truncate">
+								{{ item.description }}
+							</span>
+						</div>
+						<span
+							v-if="item.badge"
+							class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 shrink-0 ml-2"
+						>
+							{{ item.badge }}
+						</span>
+					</button>
+				</div>
+			</div>
 
-    <!-- Tasks List Container -->
-    <div class="flex-1 overflow-y-auto p-3 space-y-1">
-      <!-- Empty state: No selection -->
-      <div v-if="!hasActiveSelection" class="h-full flex flex-col items-center justify-center text-center p-6 text-zinc-400 dark:text-zinc-500">
-        <CheckSquare class="w-12 h-12 mb-3 opacity-40 stroke-1" />
-        <p class="text-sm font-medium">Select a list or view from the sidebar</p>
-        <p class="text-xs mt-1">Or create a new list to get started.</p>
-      </div>
+			<!-- Quick Shortcut Hints Toolbar below input -->
+			<div
+				class="flex items-center gap-2 mt-1.5 text-[11px] text-zinc-400 dark:text-zinc-500 select-none"
+			>
+				<span class="text-[10px] uppercase font-semibold tracking-wider text-zinc-400/80"
+					>Shortcuts:</span
+				>
+				<button
+					type="button"
+					@click="appendSmartPrefix('#')"
+					class="hover:text-purple-600 dark:hover:text-purple-400 font-mono flex items-center gap-0.5 cursor-pointer"
+					title="Add tag or list"
+				>
+					<span class="font-bold">#</span>tag
+				</button>
+				<span>•</span>
+				<button
+					type="button"
+					@click="appendSmartPrefix('^')"
+					class="hover:text-blue-600 dark:hover:text-blue-400 font-mono flex items-center gap-0.5 cursor-pointer"
+					title="Add due date"
+				>
+					<span class="font-bold">^</span>due
+				</button>
+				<span>•</span>
+				<button
+					type="button"
+					@click="appendSmartPrefix('!')"
+					class="hover:text-red-600 dark:hover:text-red-400 font-mono flex items-center gap-0.5 cursor-pointer"
+					title="Set priority (1, 2, 3)"
+				>
+					<span class="font-bold">!</span>priority
+				</button>
+			</div>
+		</div>
 
-      <!-- Loading state -->
-      <div v-else-if="taskStore.loading && taskStore.tasks.length === 0" class="py-8 text-center text-sm text-zinc-400">
-        Loading tasks...
-      </div>
+		<!-- Tasks List Container -->
+		<div class="flex-1 overflow-y-auto p-3 space-y-1">
+			<!-- Home Capture Page (no list/view selected) -->
+			<div
+				v-if="!hasActiveSelection"
+				class="h-full flex flex-col items-center justify-center px-6 py-10"
+			>
+				<!-- Icon + headline -->
+				<div class="mb-8 text-center">
+					<div
+						class="w-14 h-14 mx-auto mb-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 flex items-center justify-center shadow-sm"
+					>
+						<Zap class="w-7 h-7 text-emerald-500" />
+					</div>
+					<h1 class="text-2xl font-bold text-zinc-800 dark:text-zinc-100 mb-1 tracking-tight">
+						Capture
+					</h1>
+					<p class="text-sm text-zinc-400 dark:text-zinc-500">
+						Add to inbox instantly. Organize later.
+					</p>
+				</div>
 
-      <!-- Empty state: Active list/view has no tasks -->
-      <div v-else-if="visibleTasks.length === 0" class="h-full flex flex-col items-center justify-center text-center p-6 text-zinc-400 dark:text-zinc-500">
-        <CheckCircle2 class="w-12 h-12 mb-3 text-emerald-500/40 stroke-1" />
-        <p class="text-sm font-medium">All clear!</p>
-        <p class="text-xs mt-1">No tasks to display. Add one using the input above.</p>
-      </div>
+				<!-- Stats pills -->
+				<div class="flex items-center gap-2.5 mb-7 flex-wrap justify-center">
+					<span
+						class="flex items-center gap-1.5 text-xs bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 px-3 py-1 rounded-full"
+					>
+						<Calendar class="w-3 h-3 text-emerald-500 shrink-0" />
+						{{ taskStore.countToday }} due today
+					</span>
+					<span
+						class="flex items-center gap-1.5 text-xs bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 px-3 py-1 rounded-full"
+					>
+						<Inbox class="w-3 h-3 text-blue-500 shrink-0" />
+						{{ taskStore.countAll }} pending
+					</span>
+				</div>
 
-      <!-- Tasks list -->
-      <div
-        v-for="task in visibleTasks"
-        :key="task.id"
-        :data-task-id="task.id"
-        @click="handleSelectTask($event, task.id)"
-        @contextmenu="handleTaskContextMenu($event, task.id)"
+				<!-- Capture form -->
+				<div class="w-full max-w-lg relative">
+					<form @submit.prevent="handleAddTask" class="relative flex items-center">
+						<input
+							ref="quickAddInputRef"
+							v-model="newTaskTitle"
+							@input="updateSmartDropdown"
+							@click="updateSmartDropdown"
+							@keydown="handleQuickAddKeydown"
+							type="text"
+							data-quick-add-input
+							placeholder="What needs doing? e.g. Buy milk #shopping ^tomorrow !2"
+							:disabled="isAdding"
+							autofocus
+							class="w-full pl-4 pr-12 py-3.5 text-base rounded-xl border-2 border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder-zinc-300 dark:placeholder-zinc-600 focus:outline-none focus:border-emerald-400 dark:focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 dark:focus:ring-emerald-900/30 shadow-sm transition-all"
+						/>
+						<button
+							type="submit"
+							:disabled="isAdding || !newTaskTitle.trim()"
+							class="absolute right-3 p-1.5 text-zinc-400 hover:text-emerald-600 disabled:opacity-30 disabled:hover:text-zinc-400 transition-colors cursor-pointer"
+							title="Add task (Enter)"
+						>
+							<CornerDownLeft class="w-5 h-5" />
+						</button>
+					</form>
 
-        class="group flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg border text-sm cursor-pointer transition-all"
+					<!-- Smart Add Suggestions Dropdown -->
+					<div
+						v-if="isSmartMenuOpen && smartSuggestions.length > 0"
+						class="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-xl z-40 max-h-60 overflow-y-auto py-1"
+					>
+						<div
+							class="px-2 py-1 text-[11px] font-semibold text-zinc-400 uppercase tracking-wider flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800"
+						>
+							<span v-if="activeSmartToken?.prefix === '#'">Tags & Lists (#)</span>
+							<span v-else-if="activeSmartToken?.prefix === '^'">Due Dates (^)</span>
+							<span v-else-if="activeSmartToken?.prefix === '!'">Priority (!)</span>
+							<span class="text-[10px] font-normal normal-case text-zinc-400"
+								>↑↓ navigate · Enter pick</span
+							>
+						</div>
+						<div class="p-1 space-y-0.5">
+							<button
+								v-for="(item, idx) in smartSuggestions"
+								:key="item.label + idx"
+								type="button"
+								@mousedown.prevent="selectSmartSuggestion(item)"
+								:class="[
+									'w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs text-left cursor-pointer transition-colors',
+									idx === selectedSmartIndex
+										? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-200 font-medium'
+										: 'hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300',
+								]"
+							>
+								<div class="flex items-center gap-2 min-w-0">
+									<TagIcon
+										v-if="item.type === 'tag'"
+										class="w-3.5 h-3.5 text-purple-500 shrink-0"
+									/>
+									<FolderInput
+										v-else-if="item.type === 'list'"
+										class="w-3.5 h-3.5 text-emerald-500 shrink-0"
+									/>
+									<Calendar
+										v-else-if="item.type === 'due'"
+										class="w-3.5 h-3.5 text-blue-500 shrink-0"
+									/>
+									<Flag
+										v-else-if="item.type === 'priority'"
+										:class="[
+											'w-3.5 h-3.5 shrink-0',
+											item.insertValue === '1'
+												? 'text-red-500'
+												: item.insertValue === '2'
+													? 'text-amber-500'
+													: item.insertValue === '3'
+														? 'text-blue-500'
+														: 'text-zinc-400',
+										]"
+									/>
+									<span class="truncate">{{ item.label }}</span>
+									<span v-if="item.description" class="text-[10px] text-zinc-400 truncate">{{
+										item.description
+									}}</span>
+								</div>
+								<span
+									v-if="item.badge"
+									class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 shrink-0 ml-2"
+									>{{ item.badge }}</span
+								>
+							</button>
+						</div>
+					</div>
 
-        :class="[
-          task.id === taskStore.activeTaskId
-            ? 'bg-emerald-50/70 dark:bg-emerald-950/40 border-emerald-400 dark:border-emerald-700 shadow-2xs'
-            : selectedTaskIds.has(task.id)
-              ? 'bg-blue-50/40 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900/60'
-              : 'border-zinc-100 dark:border-zinc-800/80 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 hover:border-zinc-200 dark:hover:border-zinc-700'
-        ]"
-      >
-        <!-- Task Select Box, Complete Checkbox & Title -->
-        <div class="flex items-center gap-2.5 min-w-0 flex-1">
-          <!-- Multi-selection checkbox -->
-          <button
-            type="button"
-            @click="handleToggleSelectTask($event, task.id)"
-            class="shrink-0 p-0.5 rounded text-zinc-300 dark:text-zinc-600 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors cursor-pointer"
-            :class="{ 'opacity-100 text-emerald-600 dark:text-emerald-500': selectedTaskIds.has(task.id), 'opacity-0 group-hover:opacity-100': !selectedTaskIds.has(task.id) }"
-            :title="selectedTaskIds.has(task.id) ? 'Deselect task' : 'Select task'"
-          >
-            <CheckSquare v-if="selectedTaskIds.has(task.id)" class="w-4 h-4 text-emerald-600 dark:text-emerald-500" />
-            <Square v-else class="w-4 h-4" />
-          </button>
+					<!-- Smart add hints -->
+					<div
+						class="flex items-center justify-center gap-3 mt-3 text-[11px] text-zinc-400 dark:text-zinc-500 select-none"
+					>
+						<span class="text-[10px] uppercase font-semibold tracking-wider text-zinc-400/70"
+							>Smart add:</span
+						>
+						<button
+							type="button"
+							@click="appendSmartPrefix('#')"
+							class="font-mono hover:text-purple-600 dark:hover:text-purple-400 cursor-pointer"
+						>
+							<span class="font-bold">#</span>tag
+						</button>
+						<span>·</span>
+						<button
+							type="button"
+							@click="appendSmartPrefix('^')"
+							class="font-mono hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer"
+						>
+							<span class="font-bold">^</span>due
+						</button>
+						<span>·</span>
+						<button
+							type="button"
+							@click="appendSmartPrefix('!')"
+							class="font-mono hover:text-red-600 dark:hover:text-red-400 cursor-pointer"
+						>
+							<span class="font-bold">!</span>priority
+						</button>
+					</div>
+					<p class="mt-2 text-center text-[11px] text-zinc-400/60 dark:text-zinc-600">
+						Lands in <span class="font-medium text-zinc-500 dark:text-zinc-400">Inbox</span> by
+						default · use
+						<span class="font-mono text-zinc-500 dark:text-zinc-400">#ListName</span> to route
+						elsewhere
+					</p>
+				</div>
+			</div>
 
-          <!-- Task Complete Toggle -->
-          <button
-            type="button"
-            @click="handleToggleComplete($event, task.id)"
-            class="shrink-0 text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors cursor-pointer"
-            :title="task.completed ? 'Mark incomplete' : 'Mark complete'"
-          >
-            <CheckCircle2 v-if="task.completed" class="w-5 h-5 text-emerald-600 dark:text-emerald-500" />
-            <Circle v-else class="w-5 h-5 text-zinc-300 dark:text-zinc-600 hover:text-emerald-500" />
-          </button>
+			<!-- Loading state -->
+			<div
+				v-else-if="taskStore.loading && taskStore.tasks.length === 0"
+				class="py-8 text-center text-sm text-zinc-400"
+			>
+				Loading tasks...
+			</div>
 
-          <!-- Title and inline Tag Pills -->
-          <div class="min-w-0 flex-1 flex flex-wrap items-center gap-1.5">
-            <span
-              class="text-sm font-medium truncate"
-              :class="[
-                task.completed
-                  ? 'line-through text-zinc-400 dark:text-zinc-500 font-normal'
-                  : 'text-zinc-800 dark:text-zinc-200'
-              ]"
-            >
-              {{ task.title }}
-            </span>
+			<!-- Empty state: Active list/view has no tasks -->
+			<div
+				v-else-if="visibleTasks.length === 0"
+				class="h-full flex flex-col items-center justify-center text-center p-6 text-zinc-400 dark:text-zinc-500"
+			>
+				<CheckCircle2 class="w-12 h-12 mb-3 text-emerald-500/40 stroke-1" />
+				<p class="text-sm font-medium">All clear!</p>
+				<p class="text-xs mt-1">No tasks to display. Add one using the input above.</p>
+			</div>
 
-            <!-- Tag Pills on Task Row -->
-            <div v-if="getTaskTags(task.id).length > 0" class="flex items-center gap-1 flex-wrap shrink-0">
-              <button
-                v-for="tag in getTaskTags(task.id)"
-                :key="tag.id"
-                type="button"
-                @click="handleTagPillClick($event, tag.name)"
-                class="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/80 hover:bg-emerald-100 transition-colors cursor-pointer"
-              >
-                <span class="opacity-60">#</span>
-                <span>{{ tag.name }}</span>
-              </button>
-            </div>
-          </div>
-        </div>
+			<!-- Tasks list -->
+			<div
+				v-for="task in visibleTasks"
+				:key="task.id"
+				:data-task-id="task.id"
+				@click="handleSelectTask($event, task.id)"
+				@contextmenu="handleTaskContextMenu($event, task.id)"
+				class="group flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg border text-sm cursor-pointer transition-all"
+				:class="[
+					task.id === taskStore.activeTaskId
+						? 'bg-emerald-50/70 dark:bg-emerald-950/40 border-emerald-400 dark:border-emerald-700 shadow-2xs'
+						: selectedTaskIds.has(task.id)
+							? 'bg-blue-50/40 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900/60'
+							: 'border-zinc-100 dark:border-zinc-800/80 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 hover:border-zinc-200 dark:hover:border-zinc-700',
+				]"
+			>
+				<!-- Task Select Box, Complete Checkbox & Title -->
+				<div class="flex items-center gap-2.5 min-w-0 flex-1">
+					<!-- Multi-selection checkbox -->
+					<button
+						type="button"
+						@click="handleToggleSelectTask($event, task.id)"
+						class="shrink-0 p-0.5 rounded text-zinc-300 dark:text-zinc-600 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors cursor-pointer"
+						:class="{
+							'opacity-100 text-emerald-600 dark:text-emerald-500': selectedTaskIds.has(task.id),
+							'opacity-0 group-hover:opacity-100': !selectedTaskIds.has(task.id),
+						}"
+						:title="selectedTaskIds.has(task.id) ? 'Deselect task' : 'Select task'"
+					>
+						<CheckSquare
+							v-if="selectedTaskIds.has(task.id)"
+							class="w-4 h-4 text-emerald-600 dark:text-emerald-500"
+						/>
+						<Square v-else class="w-4 h-4" />
+					</button>
 
-        <!-- Task Metadata Badges & Actions -->
-        <div class="flex items-center gap-2 shrink-0">
-          <!-- Subtask count badge -->
-          <span
-            v-if="getSubtaskCount(task.id) && getSubtaskCount(task.id)!.total > 0"
-            class="inline-flex items-center gap-1 text-[11px] font-medium px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700/60"
-            :title="`${getSubtaskCount(task.id)!.incomplete} of ${getSubtaskCount(task.id)!.total} subtasks remaining`"
-          >
-            <ListTree class="w-3 h-3 text-zinc-400" />
-            <span>{{ getSubtaskCount(task.id)!.total - getSubtaskCount(task.id)!.incomplete }}/{{ getSubtaskCount(task.id)!.total }}</span>
-          </span>
+					<!-- Task Complete Toggle -->
+					<button
+						type="button"
+						@click="handleToggleComplete($event, task.id)"
+						class="shrink-0 text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors cursor-pointer"
+						:title="task.completed ? 'Mark incomplete' : 'Mark complete'"
+					>
+						<CheckCircle2
+							v-if="task.completed"
+							class="w-5 h-5 text-emerald-600 dark:text-emerald-500"
+						/>
+						<Circle
+							v-else
+							class="w-5 h-5 text-zinc-300 dark:text-zinc-600 hover:text-emerald-500"
+						/>
+					</button>
 
-          <!-- List badge (shown in Views) -->
-          <span
-            v-if="isView && getListName(task.list_id)"
-            class="text-[10px] font-medium text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded"
-          >
-            {{ getListName(task.list_id) }}
-          </span>
+					<!-- Title and inline Tag Pills -->
+					<div class="min-w-0 flex-1 flex flex-wrap items-center gap-1.5">
+						<span
+							class="text-sm font-medium truncate"
+							:class="[
+								task.completed
+									? 'line-through text-zinc-400 dark:text-zinc-500 font-normal'
+									: 'text-zinc-800 dark:text-zinc-200',
+							]"
+						>
+							{{ task.title }}
+						</span>
 
-          <!-- Priority indicator badge / border color (P1, P2, P3, None) -->
-          <span
-            v-if="task.priority === PRIORITY.HIGH"
-            class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-900"
-          >
-            P1
-          </span>
-          <span
-            v-else-if="task.priority === PRIORITY.MEDIUM"
-            class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900"
-          >
-            P2
-          </span>
-          <span
-            v-else-if="task.priority === PRIORITY.LOW"
-            class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-900"
-          >
-            P3
-          </span>
+						<!-- Tag Pills on Task Row -->
+						<div
+							v-if="getTaskTags(task.id).length > 0"
+							class="flex items-center gap-1 flex-wrap shrink-0"
+						>
+							<button
+								v-for="tag in getTaskTags(task.id)"
+								:key="tag.id"
+								type="button"
+								@click="handleTagPillClick($event, tag.name)"
+								class="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/80 hover:bg-emerald-100 transition-colors cursor-pointer"
+							>
+								<span class="opacity-60">#</span>
+								<span>{{ tag.name }}</span>
+							</button>
+						</div>
+					</div>
+				</div>
 
-          <!-- Due date badge -->
-          <span
-            v-if="task.due"
-            class="flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded"
-          >
-            <Calendar class="w-3 h-3" />
-            <span>{{ formatDue(task.due) }}</span>
-          </span>
+				<!-- Task Metadata Badges & Actions -->
+				<div class="flex items-center gap-2 shrink-0">
+					<!-- Subtask count badge -->
+					<span
+						v-if="getSubtaskCount(task.id) && getSubtaskCount(task.id)!.total > 0"
+						class="inline-flex items-center gap-1 text-[11px] font-medium px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700/60"
+						:title="`${getSubtaskCount(task.id)!.incomplete} of ${getSubtaskCount(task.id)!.total} subtasks remaining`"
+					>
+						<ListTree class="w-3 h-3 text-zinc-400" />
+						<span
+							>{{ getSubtaskCount(task.id)!.total - getSubtaskCount(task.id)!.incomplete }}/{{
+								getSubtaskCount(task.id)!.total
+							}}</span
+						>
+					</span>
 
-          <!-- Delete action -->
-          <button
-            type="button"
-            title="Delete task"
-            class="opacity-0 group-hover:opacity-100 hover:text-red-500 p-1 text-zinc-400 transition-opacity cursor-pointer"
-            @click="handleDeleteTask($event, task.id)"
-          >
-            <Trash2 class="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
-    </div>
-    <!-- Task Context Menu: Postpone Actions -->
-    <div
-      v-if="contextMenu.visible"
-      class="fixed z-50 w-48 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-xl text-xs space-y-0.5"
-      :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
-      @click.stop
-    >
-      <div class="px-3 py-1 text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">
-        Postpone
-      </div>
-      <button
-        type="button"
-        @click="handleContextMenuPostpone(1)"
-        class="w-full flex items-center gap-2 px-3 py-1.5 text-left text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
-      >
-        <Calendar class="w-3.5 h-3.5 text-zinc-400" />
-        <span>+1 Day (Tomorrow)</span>
-      </button>
-      <button
-        type="button"
-        @click="handleContextMenuPostpone(2)"
-        class="w-full flex items-center gap-2 px-3 py-1.5 text-left text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
-      >
-        <CalendarPlus class="w-3.5 h-3.5 text-zinc-400" />
-        <span>+2 Days</span>
-      </button>
-      <button
-        type="button"
-        @click="handleContextMenuPostpone(7)"
-        class="w-full flex items-center gap-2 px-3 py-1.5 text-left text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
-      >
-        <CalendarRange class="w-3.5 h-3.5 text-zinc-400" />
-        <span>+1 Week</span>
-      </button>
-    </div>
+					<!-- List badge (shown in Views) -->
+					<span
+						v-if="isView && getListName(task.list_id)"
+						class="text-[10px] font-medium text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded"
+					>
+						{{ getListName(task.list_id) }}
+					</span>
 
-  </section>
+					<!-- Priority indicator badge / border color (P1, P2, P3, None) -->
+					<span
+						v-if="task.priority === PRIORITY.HIGH"
+						class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-900"
+					>
+						P1
+					</span>
+					<span
+						v-else-if="task.priority === PRIORITY.MEDIUM"
+						class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900"
+					>
+						P2
+					</span>
+					<span
+						v-else-if="task.priority === PRIORITY.LOW"
+						class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-900"
+					>
+						P3
+					</span>
+
+					<!-- Due date badge -->
+					<span
+						v-if="task.due"
+						class="flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded"
+					>
+						<Calendar class="w-3 h-3" />
+						<span>{{ formatDue(task.due) }}</span>
+					</span>
+
+					<!-- Delete action -->
+					<button
+						type="button"
+						title="Delete task"
+						class="opacity-0 group-hover:opacity-100 hover:text-red-500 p-1 text-zinc-400 transition-opacity cursor-pointer"
+						@click="handleDeleteTask($event, task.id)"
+					>
+						<Trash2 class="w-3.5 h-3.5" />
+					</button>
+				</div>
+			</div>
+		</div>
+		<!-- Task Context Menu: Postpone Actions -->
+		<div
+			v-if="contextMenu.visible"
+			class="fixed z-50 w-48 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-xl text-xs space-y-0.5"
+			:style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
+			@click.stop
+		>
+			<div class="px-3 py-1 text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">
+				Postpone
+			</div>
+			<button
+				type="button"
+				@click="handleContextMenuPostpone(1)"
+				class="w-full flex items-center gap-2 px-3 py-1.5 text-left text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+			>
+				<Calendar class="w-3.5 h-3.5 text-zinc-400" />
+				<span>+1 Day (Tomorrow)</span>
+			</button>
+			<button
+				type="button"
+				@click="handleContextMenuPostpone(2)"
+				class="w-full flex items-center gap-2 px-3 py-1.5 text-left text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+			>
+				<CalendarPlus class="w-3.5 h-3.5 text-zinc-400" />
+				<span>+2 Days</span>
+			</button>
+			<button
+				type="button"
+				@click="handleContextMenuPostpone(7)"
+				class="w-full flex items-center gap-2 px-3 py-1.5 text-left text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+			>
+				<CalendarRange class="w-3.5 h-3.5 text-zinc-400" />
+				<span>+1 Week</span>
+			</button>
+		</div>
+	</section>
 </template>

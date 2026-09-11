@@ -4,8 +4,7 @@ import type { List, Task } from "../src/models/index.ts";
 
 let mockResponses: Record<string, unknown> = {};
 let mockErrors: Record<string, string> = {};
-let invokeCalls: Array<{ command: string; args?: Record<string, unknown> }> =
-	[];
+let invokeCalls: Array<{ command: string; args?: Record<string, unknown> }> = [];
 
 mock.module("@tauri-apps/api/core", () => ({
 	invoke: async (command: string, args?: Record<string, unknown>) => {

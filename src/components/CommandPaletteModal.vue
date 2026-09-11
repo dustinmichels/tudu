@@ -131,9 +131,7 @@ const commands = computed<CommandItem[]>(() => {
 			shortcut: "t",
 			icon: Plus,
 			action: () => {
-				const input = document.querySelector<HTMLInputElement>(
-					"input[data-quick-add-input]",
-				);
+				const input = document.querySelector<HTMLInputElement>("input[data-quick-add-input]");
 				input?.focus();
 			},
 		},
@@ -235,9 +233,7 @@ const commands = computed<CommandItem[]>(() => {
 		},
 		{
 			id: "action-toggle-completed-tasks",
-			title: taskStore.includeCompleted
-				? "Hide Completed Tasks"
-				: "Show Completed Tasks",
+			title: taskStore.includeCompleted ? "Hide Completed Tasks" : "Show Completed Tasks",
 			category: "View",
 			shortcut: "Cmd+H",
 			icon: CheckSquare,
@@ -273,9 +269,7 @@ const commands = computed<CommandItem[]>(() => {
 			shortcut: "/",
 			icon: Search,
 			action: () => {
-				const search = document.querySelector<HTMLInputElement>(
-					"input[data-global-search]",
-				);
+				const search = document.querySelector<HTMLInputElement>("input[data-global-search]");
 				search?.focus();
 				search?.select();
 			},
@@ -386,8 +380,7 @@ function handleKeyDown(e: KeyboardEvent) {
 	if (e.key === "ArrowDown") {
 		e.preventDefault();
 		if (filteredCommands.value.length === 0) return;
-		selectedIndex.value =
-			(selectedIndex.value + 1) % filteredCommands.value.length;
+		selectedIndex.value = (selectedIndex.value + 1) % filteredCommands.value.length;
 		scrollToSelected();
 		return;
 	}
@@ -396,8 +389,7 @@ function handleKeyDown(e: KeyboardEvent) {
 		e.preventDefault();
 		if (filteredCommands.value.length === 0) return;
 		selectedIndex.value =
-			(selectedIndex.value - 1 + filteredCommands.value.length) %
-			filteredCommands.value.length;
+			(selectedIndex.value - 1 + filteredCommands.value.length) % filteredCommands.value.length;
 		scrollToSelected();
 		return;
 	}
@@ -414,97 +406,106 @@ function handleKeyDown(e: KeyboardEvent) {
 
 function scrollToSelected() {
 	nextTick(() => {
-		const el = listContainerRef.value?.querySelector(
-			`[data-item-index="${selectedIndex.value}"]`,
-		);
+		const el = listContainerRef.value?.querySelector(`[data-item-index="${selectedIndex.value}"]`);
 		el?.scrollIntoView({ block: "nearest" });
 	});
 }
 </script>
 
 <template>
-  <div
-    v-if="uiStore.isCommandPaletteOpen"
-    class="fixed inset-0 z-50 flex items-start justify-center pt-20 px-4 bg-black/50 backdrop-blur-xs animate-in fade-in duration-150"
-    role="dialog"
-    aria-modal="true"
-    aria-label="Command Palette"
-    data-command-palette
-    @click.self="closePalette"
-    @keydown="handleKeyDown"
-  >
-    <div
-      class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xl w-full max-w-xl overflow-hidden flex flex-col max-h-[75vh]"
-    >
-      <!-- Search Input Header -->
-      <div class="flex items-center px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 gap-3">
-        <Command class="w-5 h-5 text-zinc-400 shrink-0" />
-        <input
-          ref="inputRef"
-          v-model="query"
-          type="text"
-          :placeholder="isListMode ? 'Type a list or view name...' : 'Type a command or search...'"
-          class="flex-1 bg-transparent border-0 outline-hidden text-sm text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:ring-0"
-          data-command-palette-input
-        />
-        <kbd class="hidden sm:inline-block px-1.5 py-0.5 text-[10px] font-mono text-zinc-400 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded">
-          ESC
-        </kbd>
-      </div>
+	<div
+		v-if="uiStore.isCommandPaletteOpen"
+		class="fixed inset-0 z-50 flex items-start justify-center pt-20 px-4 bg-black/50 backdrop-blur-xs animate-in fade-in duration-150"
+		role="dialog"
+		aria-modal="true"
+		aria-label="Command Palette"
+		data-command-palette
+		@click.self="closePalette"
+		@keydown="handleKeyDown"
+	>
+		<div
+			class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xl w-full max-w-xl overflow-hidden flex flex-col max-h-[75vh]"
+		>
+			<!-- Search Input Header -->
+			<div class="flex items-center px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 gap-3">
+				<Command class="w-5 h-5 text-zinc-400 shrink-0" />
+				<input
+					ref="inputRef"
+					v-model="query"
+					type="text"
+					:placeholder="isListMode ? 'Type a list or view name...' : 'Type a command or search...'"
+					class="flex-1 bg-transparent border-0 outline-hidden text-sm text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:ring-0"
+					data-command-palette-input
+				/>
+				<kbd
+					class="hidden sm:inline-block px-1.5 py-0.5 text-[10px] font-mono text-zinc-400 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded"
+				>
+					ESC
+				</kbd>
+			</div>
 
-      <!-- Results list -->
-      <div
-        ref="listContainerRef"
-        class="overflow-y-auto p-2 divide-y divide-zinc-100 dark:divide-zinc-800/50 max-h-96"
-        data-command-palette-list
-      >
-        <div v-if="filteredCommands.length === 0" class="px-4 py-8 text-center text-sm text-zinc-400">
-          No matching commands found
-        </div>
+			<!-- Results list -->
+			<div
+				ref="listContainerRef"
+				class="overflow-y-auto p-2 divide-y divide-zinc-100 dark:divide-zinc-800/50 max-h-96"
+				data-command-palette-list
+			>
+				<div
+					v-if="filteredCommands.length === 0"
+					class="px-4 py-8 text-center text-sm text-zinc-400"
+				>
+					No matching commands found
+				</div>
 
-        <div v-else class="space-y-0.5">
-          <button
-            v-for="(cmd, index) in filteredCommands"
-            :key="cmd.id"
-            :data-item-index="index"
-            type="button"
-            class="w-full flex items-center justify-between px-3 py-2 rounded-lg text-left text-xs transition-colors cursor-pointer"
-            :class="[
-              index === selectedIndex
-                ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
-                : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/50'
-            ]"
-            @click="executeCommand(cmd)"
-            @mouseenter="selectedIndex = index"
-          >
-            <div class="flex items-center gap-2.5 min-w-0">
-              <component :is="cmd.icon" class="w-4 h-4 text-zinc-400 shrink-0" />
-              <span class="truncate font-medium">{{ cmd.title }}</span>
-              <span class="text-[10px] text-zinc-400 dark:text-zinc-500 bg-zinc-100 dark:bg-zinc-800/60 px-1.5 py-0.5 rounded border border-zinc-200/50 dark:border-zinc-700/50">
-                {{ cmd.category }}
-              </span>
-            </div>
+				<div v-else class="space-y-0.5">
+					<button
+						v-for="(cmd, index) in filteredCommands"
+						:key="cmd.id"
+						:data-item-index="index"
+						type="button"
+						class="w-full flex items-center justify-between px-3 py-2 rounded-lg text-left text-xs transition-colors cursor-pointer"
+						:class="[
+							index === selectedIndex
+								? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
+								: 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/50',
+						]"
+						@click="executeCommand(cmd)"
+						@mouseenter="selectedIndex = index"
+					>
+						<div class="flex items-center gap-2.5 min-w-0">
+							<component :is="cmd.icon" class="w-4 h-4 text-zinc-400 shrink-0" />
+							<span class="truncate font-medium">{{ cmd.title }}</span>
+							<span
+								class="text-[10px] text-zinc-400 dark:text-zinc-500 bg-zinc-100 dark:bg-zinc-800/60 px-1.5 py-0.5 rounded border border-zinc-200/50 dark:border-zinc-700/50"
+							>
+								{{ cmd.category }}
+							</span>
+						</div>
 
-            <div v-if="cmd.shortcut" class="flex items-center gap-1 shrink-0 ml-3">
-              <kbd class="px-1.5 py-0.5 font-mono text-[10px] rounded bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400">
-                {{ cmd.shortcut }}
-              </kbd>
-            </div>
-          </button>
-        </div>
-      </div>
+						<div v-if="cmd.shortcut" class="flex items-center gap-1 shrink-0 ml-3">
+							<kbd
+								class="px-1.5 py-0.5 font-mono text-[10px] rounded bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400"
+							>
+								{{ cmd.shortcut }}
+							</kbd>
+						</div>
+					</button>
+				</div>
+			</div>
 
-      <!-- Footer Help -->
-      <div class="px-4 py-2 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 flex items-center justify-between text-[11px] text-zinc-400">
-        <div class="flex items-center gap-3">
-          <span><kbd class="font-mono">↑↓</kbd> to navigate</span>
-          <span><kbd class="font-mono">↵</kbd> to select</span>
-          <span><kbd class="font-mono">esc</kbd> to close</span>
-        </div>
-        <div v-if="!isListMode" class="hidden sm:block">
-          <span>Press <kbd class="font-mono">⌘P</kbd> to jump directly to a list</span>
-        </div>
-      </div>
-    </div>
-  </div>
+			<!-- Footer Help -->
+			<div
+				class="px-4 py-2 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 flex items-center justify-between text-[11px] text-zinc-400"
+			>
+				<div class="flex items-center gap-3">
+					<span><kbd class="font-mono">↑↓</kbd> to navigate</span>
+					<span><kbd class="font-mono">↵</kbd> to select</span>
+					<span><kbd class="font-mono">esc</kbd> to close</span>
+				</div>
+				<div v-if="!isListMode" class="hidden sm:block">
+					<span>Press <kbd class="font-mono">⌘P</kbd> to jump directly to a list</span>
+				</div>
+			</div>
+		</div>
+	</div>
 </template>

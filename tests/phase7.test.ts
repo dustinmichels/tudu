@@ -28,18 +28,13 @@ mock.module("@tauri-apps/api/core", () => ({
 		}
 
 		if (command === "get_task_detail") {
-			const id =
-				args && typeof args === "object" && "id" in args ? String(args.id) : "";
+			const id = args && typeof args === "object" && "id" in args ? String(args.id) : "";
 			const task = mockTasks.find((t) => t.id === id);
 			if (!task) return null;
-			const assignedTagIds = mockTaskTags
-				.filter((tt) => tt.taskId === id)
-				.map((tt) => tt.tagId);
+			const assignedTagIds = mockTaskTags.filter((tt) => tt.taskId === id).map((tt) => tt.tagId);
 			const tags = mockTags.filter((t) => assignedTagIds.includes(t.id));
 			const notes = mockNotes.filter((n) => n.task_id === id);
-			const subtasks = mockTasks.filter(
-				(t) => t.parent_id === id && !t.deleted_at,
-			);
+			const subtasks = mockTasks.filter((t) => t.parent_id === id && !t.deleted_at);
 			return {
 				...task,
 				tags,
@@ -66,10 +61,7 @@ mock.module("@tauri-apps/api/core", () => ({
 		}
 
 		if (command === "create_task") {
-			const record =
-				args && typeof args === "object"
-					? (args as Record<string, unknown>)
-					: {};
+			const record = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
 			const parentId =
 				typeof record.parentId === "string"
 					? record.parentId
@@ -82,13 +74,10 @@ mock.module("@tauri-apps/api/core", () => ({
 					: typeof record.list_id === "string"
 						? record.list_id
 						: "list-inbox";
-			const title =
-				typeof record.title === "string" ? record.title : "Untitled";
+			const title = typeof record.title === "string" ? record.title : "Untitled";
 			const due = typeof record.due === "string" ? record.due : null;
 			const priority =
-				typeof record.priority === "number"
-					? (record.priority as Task["priority"])
-					: null;
+				typeof record.priority === "number" ? (record.priority as Task["priority"]) : null;
 
 			const newTask: Task = {
 				id: `task-${Date.now()}-${Math.random()}`,
@@ -114,12 +103,9 @@ mock.module("@tauri-apps/api/core", () => ({
 		}
 
 		if (command === "toggle_task_complete") {
-			const id =
-				args && typeof args === "object" && "id" in args ? String(args.id) : "";
+			const id = args && typeof args === "object" && "id" in args ? String(args.id) : "";
 			const completed =
-				args && typeof args === "object" && "completed" in args
-					? Boolean(args.completed)
-					: false;
+				args && typeof args === "object" && "completed" in args ? Boolean(args.completed) : false;
 			const idx = mockTasks.findIndex((t) => t.id === id);
 			if (idx !== -1) {
 				const existing = mockTasks[idx];
@@ -133,15 +119,9 @@ mock.module("@tauri-apps/api/core", () => ({
 		}
 
 		if (command === "create_tag") {
-			const name =
-				args && typeof args === "object" && "name" in args
-					? String(args.name)
-					: "";
+			const name = args && typeof args === "object" && "name" in args ? String(args.name) : "";
 			const color =
-				args &&
-				typeof args === "object" &&
-				"color" in args &&
-				typeof args.color === "string"
+				args && typeof args === "object" && "color" in args && typeof args.color === "string"
 					? args.color
 					: null;
 			const newTag: Tag = {
@@ -158,56 +138,35 @@ mock.module("@tauri-apps/api/core", () => ({
 
 		if (command === "assign_tag") {
 			const taskId =
-				args && typeof args === "object" && "taskId" in args
-					? String(args.taskId)
-					: "";
-			const tagId =
-				args && typeof args === "object" && "tagId" in args
-					? String(args.tagId)
-					: "";
+				args && typeof args === "object" && "taskId" in args ? String(args.taskId) : "";
+			const tagId = args && typeof args === "object" && "tagId" in args ? String(args.tagId) : "";
 			mockTaskTags.push({ taskId, tagId });
 			return null;
 		}
 
 		if (command === "remove_tag") {
 			const taskId =
-				args && typeof args === "object" && "taskId" in args
-					? String(args.taskId)
-					: "";
-			const tagId =
-				args && typeof args === "object" && "tagId" in args
-					? String(args.tagId)
-					: "";
-			mockTaskTags = mockTaskTags.filter(
-				(tt) => !(tt.taskId === taskId && tt.tagId === tagId),
-			);
+				args && typeof args === "object" && "taskId" in args ? String(args.taskId) : "";
+			const tagId = args && typeof args === "object" && "tagId" in args ? String(args.tagId) : "";
+			mockTaskTags = mockTaskTags.filter((tt) => !(tt.taskId === taskId && tt.tagId === tagId));
 			return null;
 		}
 
 		if (command === "get_notes") {
 			const taskId =
-				args && typeof args === "object" && "taskId" in args
-					? String(args.taskId)
-					: "";
+				args && typeof args === "object" && "taskId" in args ? String(args.taskId) : "";
 			return mockNotes.filter((n) => n.task_id === taskId);
 		}
 
 		if (command === "add_note") {
 			const taskId =
-				args && typeof args === "object" && "taskId" in args
-					? String(args.taskId)
-					: "";
+				args && typeof args === "object" && "taskId" in args ? String(args.taskId) : "";
 			const title =
-				args &&
-				typeof args === "object" &&
-				"title" in args &&
-				typeof args.title === "string"
+				args && typeof args === "object" && "title" in args && typeof args.title === "string"
 					? args.title
 					: null;
 			const content =
-				args && typeof args === "object" && "content" in args
-					? String(args.content)
-					: "";
+				args && typeof args === "object" && "content" in args ? String(args.content) : "";
 			const newNote: Note = {
 				id: `note-${Date.now()}`,
 				task_id: taskId,
@@ -222,19 +181,13 @@ mock.module("@tauri-apps/api/core", () => ({
 		}
 
 		if (command === "update_note") {
-			const id =
-				args && typeof args === "object" && "id" in args ? String(args.id) : "";
+			const id = args && typeof args === "object" && "id" in args ? String(args.id) : "";
 			const title =
-				args &&
-				typeof args === "object" &&
-				"title" in args &&
-				typeof args.title === "string"
+				args && typeof args === "object" && "title" in args && typeof args.title === "string"
 					? args.title
 					: undefined;
 			const content =
-				args && typeof args === "object" && "content" in args
-					? String(args.content)
-					: undefined;
+				args && typeof args === "object" && "content" in args ? String(args.content) : undefined;
 			const idx = mockNotes.findIndex((n) => n.id === id);
 			if (idx !== -1) {
 				const existing = mockNotes[idx];
@@ -249,8 +202,7 @@ mock.module("@tauri-apps/api/core", () => ({
 		}
 
 		if (command === "delete_note") {
-			const id =
-				args && typeof args === "object" && "id" in args ? String(args.id) : "";
+			const id = args && typeof args === "object" && "id" in args ? String(args.id) : "";
 			mockNotes = mockNotes.filter((n) => n.id !== id);
 			return null;
 		}
@@ -448,8 +400,7 @@ describe("Phase 7: Right Pane (Task Detail & Subtasks)", () => {
 		const note = await addNote({
 			task_id: "task-parent",
 			title: "Meeting Minutes",
-			content:
-				"Discussed roadmap **bold** and `code` with [link](https://test.com).",
+			content: "Discussed roadmap **bold** and `code` with [link](https://test.com).",
 		});
 
 		expect(note.title).toBe("Meeting Minutes");

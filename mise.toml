@@ -2,3 +2,11 @@
 description = "Totally reset the local development database"
 run = "./scripts/reset-db.sh $@"
 alias = ["reset-db", "db-reset"]
+
+[tasks.install]
+description = "Build app and install to /Applications"
+run = """
+bun run tauri build
+cp -r src-tauri/target/release/bundle/macos/TuDu.app /Applications/TuDu.app
+echo "Installed to /Applications/TuDu.app"
+"""

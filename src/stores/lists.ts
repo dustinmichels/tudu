@@ -14,7 +14,8 @@ export type DefaultView =
 	| "tomorrow"
 	| "this_week"
 	| "all"
-	| "trash";
+	| "trash"
+	| "calendar";
 
 export const useListStore = defineStore("lists", () => {
 	const lists = ref<List[]>([]);
@@ -59,21 +60,15 @@ export const useListStore = defineStore("lists", () => {
 		try {
 			const fetched = await apiGetLists();
 			lists.value = fetched;
-			if (!activeView.value) {
-				if (
-					activeListId.value &&
-					!fetched.some((l) => l.id === activeListId.value)
-				) {
-					activeListId.value =
-						fetched.find((l) => l.name.toLowerCase() === "inbox")?.id ??
-						fetched[0]?.id ??
-						null;
-				} else if (!activeListId.value && fetched.length > 0) {
-					activeListId.value =
-						fetched.find((l) => l.name.toLowerCase() === "inbox")?.id ??
-						fetched[0]?.id ??
-						null;
-				}
+			// Only repair a stale activeListId (previously selected list no longer exists).
+			// Never auto-assign when activeListId is null — that preserves the home page on startup.
+			if (
+				!activeView.value &&
+				activeListId.value &&
+				!fetched.some((l) => l.id === activeListId.value)
+			) {
+				activeListId.value =
+					fetched.find((l) => l.name.toLowerCase() === "inbox")?.id ?? fetched[0]?.id ?? null;
 			}
 			return fetched;
 		} catch (err) {
@@ -85,10 +80,12 @@ export const useListStore = defineStore("lists", () => {
 		}
 	}
 
-	async function createList(
-		name: string,
-		color?: string | null,
-	): Promise<List> {
+	function goHome() {
+		activeListId.value = null;
+		activeView.value = null;
+	}
+
+	async function createList(name: string, color?: string | null): Promise<List> {
 		loading.value = true;
 		error.value = null;
 		try {
@@ -166,5 +163,6 @@ export const useListStore = defineStore("lists", () => {
 		createList,
 		updateList,
 		deleteList,
+		goHome,
 	};
 });

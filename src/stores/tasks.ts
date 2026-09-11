@@ -1,11 +1,6 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
-import type {
-	CreateTaskInput,
-	Priority,
-	Task,
-	UpdateTaskInput,
-} from "../models/index.ts";
+import type { CreateTaskInput, Priority, Task, UpdateTaskInput } from "../models/index.ts";
 import {
 	batchUpdateTasks as apiBatchUpdateTasks,
 	createTask as apiCreateTask,
@@ -75,17 +70,11 @@ export const useTaskStore = defineStore("tasks", () => {
 			null,
 	);
 
-	const incompleteTasks = computed<Task[]>(() =>
-		tasks.value.filter((t) => !t.completed),
-	);
+	const incompleteTasks = computed<Task[]>(() => tasks.value.filter((t) => !t.completed));
 
-	const completedTasks = computed<Task[]>(() =>
-		tasks.value.filter((t) => t.completed),
-	);
+	const completedTasks = computed<Task[]>(() => tasks.value.filter((t) => t.completed));
 
-	const rootTasks = computed<Task[]>(() =>
-		tasks.value.filter((t) => !t.parent_id),
-	);
+	const rootTasks = computed<Task[]>(() => tasks.value.filter((t) => !t.parent_id));
 
 	// Smart counts and lists
 	const smartCounts = computed(() => {
@@ -109,25 +98,15 @@ export const useTaskStore = defineStore("tasks", () => {
 		});
 	});
 
-	const todayTasks = computed<Task[]>(() =>
-		querySmartList(allTasks.value, "today"),
-	);
+	const todayTasks = computed<Task[]>(() => querySmartList(allTasks.value, "today"));
 
-	const tomorrowTasks = computed<Task[]>(() =>
-		querySmartList(allTasks.value, "tomorrow"),
-	);
+	const tomorrowTasks = computed<Task[]>(() => querySmartList(allTasks.value, "tomorrow"));
 
-	const thisWeekTasks = computed<Task[]>(() =>
-		querySmartList(allTasks.value, "this_week"),
-	);
+	const thisWeekTasks = computed<Task[]>(() => querySmartList(allTasks.value, "this_week"));
 
-	const allTasksList = computed<Task[]>(() =>
-		querySmartList(allTasks.value, "all"),
-	);
+	const allTasksList = computed<Task[]>(() => querySmartList(allTasks.value, "all"));
 
-	const trashTasks = computed<Task[]>(() =>
-		querySmartList(allTasks.value, "trash"),
-	);
+	const trashTasks = computed<Task[]>(() => querySmartList(allTasks.value, "trash"));
 
 	// Reactive filtered tasks based on filterStore
 	const filteredTasks = computed<Task[]>(() => {
@@ -167,11 +146,7 @@ export const useTaskStore = defineStore("tasks", () => {
 
 	function getListOverdueCount(listId: string): number {
 		return allTasks.value.filter(
-			(t) =>
-				!t.completed &&
-				t.deleted_at === null &&
-				t.list_id === listId &&
-				isOverdue(t.due),
+			(t) => !t.completed && t.deleted_at === null && t.list_id === listId && isOverdue(t.due),
 		).length;
 	}
 
@@ -224,12 +199,7 @@ export const useTaskStore = defineStore("tasks", () => {
 		error.value = null;
 		try {
 			const shouldInclude = withCompleted ?? includeCompleted.value;
-			const fetched = await apiGetTasks(
-				targetListId,
-				shouldInclude,
-				targetView,
-				targetTag,
-			);
+			const fetched = await apiGetTasks(targetListId, shouldInclude, targetView, targetTag);
 			tasks.value = fetched ?? [];
 			return tasks.value;
 		} catch (err) {
@@ -280,11 +250,8 @@ export const useTaskStore = defineStore("tasks", () => {
 	}
 
 	async function toggleTask(id: string, completed?: boolean): Promise<Task> {
-		const target =
-			tasks.value.find((t) => t.id === id) ??
-			allTasks.value.find((t) => t.id === id);
-		const nextCompleted =
-			completed !== undefined ? completed : !(target?.completed ?? false);
+		const target = tasks.value.find((t) => t.id === id) ?? allTasks.value.find((t) => t.id === id);
+		const nextCompleted = completed !== undefined ? completed : !(target?.completed ?? false);
 
 		// Optimistic update
 		const prevCompleted = target?.completed ?? false;
@@ -381,9 +348,7 @@ export const useTaskStore = defineStore("tasks", () => {
 		}
 
 		// Update pending input
-		state.pendingInput = state.pendingInput
-			? { ...state.pendingInput, ...input }
-			: { ...input };
+		state.pendingInput = state.pendingInput ? { ...state.pendingInput, ...input } : { ...input };
 
 		if (debounceDelay > 0) {
 			return new Promise<Task>((resolve, reject) => {
@@ -421,8 +386,7 @@ export const useTaskStore = defineStore("tasks", () => {
 		const state = taskDebounceStateMap.get(id);
 		if (!state) {
 			const existing =
-				tasks.value.find((t) => t.id === id) ??
-				allTasks.value.find((t) => t.id === id);
+				tasks.value.find((t) => t.id === id) ?? allTasks.value.find((t) => t.id === id);
 			if (existing) return existing;
 			throw new Error(`Task not found for id ${id}`);
 		}
@@ -440,8 +404,7 @@ export const useTaskStore = defineStore("tasks", () => {
 		// Nothing pending to persist
 		if (!state.pendingInput) {
 			const existing =
-				tasks.value.find((t) => t.id === id) ??
-				allTasks.value.find((t) => t.id === id);
+				tasks.value.find((t) => t.id === id) ?? allTasks.value.find((t) => t.id === id);
 			const currentResolves = [...state.pendingResolves];
 			state.pendingResolves = [];
 			state.pendingRejects = [];
@@ -495,11 +458,7 @@ export const useTaskStore = defineStore("tasks", () => {
 			} finally {
 				state.activePromise = null;
 				// Clean up state map if completely idle
-				if (
-					!state.pendingInput &&
-					state.pendingResolves.length === 0 &&
-					state.timer === null
-				) {
+				if (!state.pendingInput && state.pendingResolves.length === 0 && state.timer === null) {
 					taskDebounceStateMap.delete(id);
 				}
 			}
@@ -529,11 +488,7 @@ export const useTaskStore = defineStore("tasks", () => {
 			while (expanded) {
 				expanded = false;
 				for (const t of [...tasks.value, ...allTasks.value]) {
-					if (
-						t.parent_id &&
-						idsToRemove.has(t.parent_id) &&
-						!idsToRemove.has(t.id)
-					) {
+					if (t.parent_id && idsToRemove.has(t.parent_id) && !idsToRemove.has(t.id)) {
 						idsToRemove.add(t.id);
 						expanded = true;
 					}
@@ -576,11 +531,7 @@ export const useTaskStore = defineStore("tasks", () => {
 			// Re-fetch current view / list to reconcile membership accurately
 			const listStore = useListStore();
 			const filterStore = useFilterStore();
-			if (
-				listStore.activeListId ||
-				listStore.activeView ||
-				filterStore.selectedTag
-			) {
+			if (listStore.activeListId || listStore.activeView || filterStore.selectedTag) {
 				await fetchTasks(
 					listStore.activeListId,
 					includeCompleted.value,

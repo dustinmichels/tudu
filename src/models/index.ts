@@ -6,11 +6,7 @@ export const PRIORITY = {
 	LOW: 3,
 } as const;
 
-export type TaskStatus =
-	| "needs_action"
-	| "in_progress"
-	| "completed"
-	| "cancelled";
+export type TaskStatus = "needs_action" | "in_progress" | "completed" | "cancelled";
 
 export type OpenTaskPriority = "high" | "medium" | "low" | "none";
 

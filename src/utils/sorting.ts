@@ -26,11 +26,7 @@ export function compareByCompletion(a: Task, b: Task): number {
  * asc: 1 -> 2 -> 3 -> null
  * desc: 3 -> 2 -> 1 -> null
  */
-export function compareByPriority(
-	a: Task,
-	b: Task,
-	order: SortOrder = "asc",
-): number {
+export function compareByPriority(a: Task, b: Task, order: SortOrder = "asc"): number {
 	const aP = a.priority;
 	const bP = b.priority;
 
@@ -48,11 +44,7 @@ export function compareByPriority(
  * asc: earliest due first -> null
  * desc: latest due first -> null
  */
-export function compareByDueDate(
-	a: Task,
-	b: Task,
-	order: SortOrder = "asc",
-): number {
+export function compareByDueDate(a: Task, b: Task, order: SortOrder = "asc"): number {
 	const aDue = a.due;
 	const bDue = b.due;
 
@@ -77,11 +69,7 @@ export function compareByDueDate(
  * asc: A -> Z
  * desc: Z -> A
  */
-export function compareByTitle(
-	a: Task,
-	b: Task,
-	order: SortOrder = "asc",
-): number {
+export function compareByTitle(a: Task, b: Task, order: SortOrder = "asc"): number {
 	const aTitle = a.title ?? "";
 	const bTitle = b.title ?? "";
 	const cmp = aTitle.localeCompare(bTitle, undefined, {
@@ -129,15 +117,8 @@ export function compareByManual(
 /**
  * Build a comparator function based on SortOptions.
  */
-export function createTaskComparator(
-	options: SortOptions = {},
-): (a: Task, b: Task) => number {
-	const {
-		field = "priority",
-		order = "asc",
-		completedToEnd = false,
-		manualOrder,
-	} = options;
+export function createTaskComparator(options: SortOptions = {}): (a: Task, b: Task) => number {
+	const { field = "priority", order = "asc", completedToEnd = false, manualOrder } = options;
 
 	return (a: Task, b: Task): number => {
 		// Completed tasks sent to the bottom if requested

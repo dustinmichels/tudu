@@ -170,9 +170,7 @@ describe("Phase 6: Center Pane (Batch Actions & Task Row Item)", () => {
 		expect(taskStore.tasks.find((t) => t.id === "t1")?.completed).toBeTrue();
 		expect(taskStore.tasks.find((t) => t.id === "t2")?.completed).toBeTrue();
 
-		const batchCall = mockInvokes.find(
-			(i) => i.command === "batch_update_tasks",
-		);
+		const batchCall = mockInvokes.find((i) => i.command === "batch_update_tasks");
 		expect(batchCall).toBeDefined();
 	});
 

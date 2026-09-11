@@ -131,40 +131,32 @@ const RTM_PRIORITY_MAP: Record<string, OpenTaskPriority> = {
 	PN: "none",
 };
 
-export function mapRememberTheMilkToOpenTask(
-	rtmData: RTMExport,
-): OpenTaskDocument {
+export function mapRememberTheMilkToOpenTask(rtmData: RTMExport): OpenTaskDocument {
 	const timezone = rtmData.config?.timezone_id || null;
 
 	// Map regular lists
 	const lists: OpenTaskTaskList[] = (rtmData.lists || []).map((l, index) => {
 		const extra: Record<string, unknown> = {};
-		if (l.sorting_scheme_id !== undefined)
-			extra.sorting_scheme_id = l.sorting_scheme_id;
+		if (l.sorting_scheme_id !== undefined) extra.sorting_scheme_id = l.sorting_scheme_id;
 		if (l.token !== undefined) extra.token = l.token;
 		if (l.syncable !== undefined) extra.syncable = l.syncable;
 
 		const isArchived = Boolean(
-			l.archived === 1 ||
-				l.archived === "1" ||
-				l.archived === true ||
-				l.is_archived === true,
+			l.archived === 1 || l.archived === "1" || l.archived === true || l.is_archived === true,
 		);
 
 		return {
 			id: String(l.id),
 			name: l.name,
 			color: null,
-			position:
-				typeof l.relative_position === "number" ? l.relative_position : index,
+			position: typeof l.relative_position === "number" ? l.relative_position : index,
 			is_archived: isArchived,
 			extra: Object.keys(extra).length > 0 ? extra : null,
 		};
 	});
 
 	// Also map archived_lists if present
-	const rawArchived =
-		((rtmData as Record<string, unknown>).archived_lists as RTMList[]) || [];
+	const rawArchived = ((rtmData as Record<string, unknown>).archived_lists as RTMList[]) || [];
 	for (const al of rawArchived) {
 		const existing = lists.find((l) => l.id === String(al.id));
 		if (existing) {
@@ -174,10 +166,7 @@ export function mapRememberTheMilkToOpenTask(
 				id: String(al.id),
 				name: al.name,
 				color: null,
-				position:
-					typeof al.relative_position === "number"
-						? al.relative_position
-						: lists.length,
+				position: typeof al.relative_position === "number" ? al.relative_position : lists.length,
 				is_archived: true,
 			});
 		}
@@ -188,18 +177,15 @@ export function mapRememberTheMilkToOpenTask(
 		for (const sl of rtmData.smart_lists) {
 			const isArchived = Boolean(
 				(sl as Record<string, unknown>).archived === 1 ||
-					(sl as Record<string, unknown>).archived === "1" ||
-					(sl as Record<string, unknown>).archived === true ||
-					(sl as Record<string, unknown>).is_archived === true,
+				(sl as Record<string, unknown>).archived === "1" ||
+				(sl as Record<string, unknown>).archived === true ||
+				(sl as Record<string, unknown>).is_archived === true,
 			);
 			lists.push({
 				id: String(sl.id),
 				name: sl.name,
 				color: null,
-				position:
-					typeof sl.relative_position === "number"
-						? sl.relative_position
-						: lists.length,
+				position: typeof sl.relative_position === "number" ? sl.relative_position : lists.length,
 				is_archived: isArchived,
 				extra: {
 					is_smart_list: true,
@@ -237,11 +223,7 @@ export function mapRememberTheMilkToOpenTask(
 	const notesBySeries: Record<string, OpenTaskNote[]> = {};
 	if (rtmData.notes) {
 		for (const n of rtmData.notes) {
-			const targetKey = n.series_id
-				? String(n.series_id)
-				: n.task_id
-					? String(n.task_id)
-					: null;
+			const targetKey = n.series_id ? String(n.series_id) : n.task_id ? String(n.task_id) : null;
 			if (!targetKey) continue;
 
 			const opentaskNote: OpenTaskNote = {
@@ -263,18 +245,12 @@ export function mapRememberTheMilkToOpenTask(
 	const remindersBySeries: Record<string, OpenTaskReminder[]> = {};
 	if (rtmData.reminders) {
 		for (const r of rtmData.reminders) {
-			const targetKey = r.series_id
-				? String(r.series_id)
-				: r.task_id
-					? String(r.task_id)
-					: null;
+			const targetKey = r.series_id ? String(r.series_id) : r.task_id ? String(r.task_id) : null;
 			if (!targetKey) continue;
 
 			let trigger = "-PT0M";
 			if (r.reminder_type === "beforeDueDate" && r.reminder_params) {
-				trigger = r.reminder_params.startsWith("-")
-					? r.reminder_params
-					: `-${r.reminder_params}`;
+				trigger = r.reminder_params.startsWith("-") ? r.reminder_params : `-${r.reminder_params}`;
 			} else if (r.reminder_type === "atDueTime") {
 				trigger = "-PT0M";
 			}
@@ -301,21 +277,13 @@ export function mapRememberTheMilkToOpenTask(
 
 		// Associated notes & reminders
 		const taskNotes = [
-			...(seriesKey && notesBySeries[seriesKey]
-				? notesBySeries[seriesKey]
-				: []),
-			...(notesBySeries[taskKey] && taskKey !== seriesKey
-				? notesBySeries[taskKey]
-				: []),
+			...(seriesKey && notesBySeries[seriesKey] ? notesBySeries[seriesKey] : []),
+			...(notesBySeries[taskKey] && taskKey !== seriesKey ? notesBySeries[taskKey] : []),
 		];
 
 		const taskReminders = [
-			...(seriesKey && remindersBySeries[seriesKey]
-				? remindersBySeries[seriesKey]
-				: []),
-			...(remindersBySeries[taskKey] && taskKey !== seriesKey
-				? remindersBySeries[taskKey]
-				: []),
+			...(seriesKey && remindersBySeries[seriesKey] ? remindersBySeries[seriesKey] : []),
+			...(remindersBySeries[taskKey] && taskKey !== seriesKey ? remindersBySeries[taskKey] : []),
 		];
 
 		// Status & completion
@@ -329,9 +297,7 @@ export function mapRememberTheMilkToOpenTask(
 
 		// Priority
 		const priorityRaw = t.priority ?? null;
-		const priority = priorityRaw
-			? (RTM_PRIORITY_MAP[priorityRaw.toUpperCase()] ?? "none")
-			: "none";
+		const priority = priorityRaw ? (RTM_PRIORITY_MAP[priorityRaw.toUpperCase()] ?? "none") : "none";
 
 		// Location
 		let locationName: string | null = null;
@@ -339,10 +305,7 @@ export function mapRememberTheMilkToOpenTask(
 		const loc = t.location_id ? locationById[String(t.location_id)] : undefined;
 		if (loc) {
 			locationName = loc.address || loc.name;
-			if (
-				typeof loc.latitude === "number" &&
-				typeof loc.longitude === "number"
-			) {
+			if (typeof loc.latitude === "number" && typeof loc.longitude === "number") {
 				geo = { latitude: loc.latitude, longitude: loc.longitude };
 			}
 		}

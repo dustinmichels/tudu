@@ -7,8 +7,7 @@ import { useUIStore } from "../src/stores/ui.ts";
 mock.module("@tauri-apps/api/core", () => ({
 	invoke: async (command: string, args?: unknown) => {
 		if (command === "toggle_task_complete") {
-			const { id, completed } =
-				(args as { id: string; completed: boolean }) || {};
+			const { id, completed } = (args as { id: string; completed: boolean }) || {};
 			return {
 				id,
 				title: "Task 1",
@@ -96,8 +95,7 @@ describe("Keyboard Shortcuts & Navigation", () => {
 		let currentIndex = taskStore.activeTaskId
 			? visible.findIndex((t) => t.id === taskStore.activeTaskId)
 			: -1;
-		let nextIndex =
-			currentIndex === -1 ? 0 : Math.min(currentIndex + 1, visible.length - 1);
+		let nextIndex = currentIndex === -1 ? 0 : Math.min(currentIndex + 1, visible.length - 1);
 		taskStore.setActiveTask(visible[nextIndex]?.id ?? null);
 		expect(taskStore.activeTaskId).toBe("t1");
 
@@ -105,8 +103,7 @@ describe("Keyboard Shortcuts & Navigation", () => {
 		currentIndex = taskStore.activeTaskId
 			? visible.findIndex((t) => t.id === taskStore.activeTaskId)
 			: -1;
-		nextIndex =
-			currentIndex === -1 ? 0 : Math.min(currentIndex + 1, visible.length - 1);
+		nextIndex = currentIndex === -1 ? 0 : Math.min(currentIndex + 1, visible.length - 1);
 		taskStore.setActiveTask(visible[nextIndex]?.id ?? null);
 		expect(taskStore.activeTaskId).toBe("t2");
 
@@ -114,8 +111,7 @@ describe("Keyboard Shortcuts & Navigation", () => {
 		currentIndex = taskStore.activeTaskId
 			? visible.findIndex((t) => t.id === taskStore.activeTaskId)
 			: -1;
-		nextIndex =
-			currentIndex === -1 ? 0 : Math.min(currentIndex + 1, visible.length - 1);
+		nextIndex = currentIndex === -1 ? 0 : Math.min(currentIndex + 1, visible.length - 1);
 		taskStore.setActiveTask(visible[nextIndex]?.id ?? null);
 		expect(taskStore.activeTaskId).toBe("t3");
 
@@ -123,8 +119,7 @@ describe("Keyboard Shortcuts & Navigation", () => {
 		currentIndex = taskStore.activeTaskId
 			? visible.findIndex((t) => t.id === taskStore.activeTaskId)
 			: -1;
-		nextIndex =
-			currentIndex === -1 ? 0 : Math.min(currentIndex + 1, visible.length - 1);
+		nextIndex = currentIndex === -1 ? 0 : Math.min(currentIndex + 1, visible.length - 1);
 		taskStore.setActiveTask(visible[nextIndex]?.id ?? null);
 		expect(taskStore.activeTaskId).toBe("t3");
 	});
@@ -178,8 +173,7 @@ describe("Keyboard Shortcuts & Navigation", () => {
 		let currentIndex = taskStore.activeTaskId
 			? visible.findIndex((t) => t.id === taskStore.activeTaskId)
 			: -1;
-		let prevIndex =
-			currentIndex === -1 ? visible.length - 1 : Math.max(currentIndex - 1, 0);
+		let prevIndex = currentIndex === -1 ? visible.length - 1 : Math.max(currentIndex - 1, 0);
 		taskStore.setActiveTask(visible[prevIndex]?.id ?? null);
 		expect(taskStore.activeTaskId).toBe("t1");
 
@@ -187,8 +181,7 @@ describe("Keyboard Shortcuts & Navigation", () => {
 		currentIndex = taskStore.activeTaskId
 			? visible.findIndex((t) => t.id === taskStore.activeTaskId)
 			: -1;
-		prevIndex =
-			currentIndex === -1 ? visible.length - 1 : Math.max(currentIndex - 1, 0);
+		prevIndex = currentIndex === -1 ? visible.length - 1 : Math.max(currentIndex - 1, 0);
 		taskStore.setActiveTask(visible[prevIndex]?.id ?? null);
 		expect(taskStore.activeTaskId).toBe("t1");
 	});
