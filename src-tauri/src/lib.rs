@@ -2,12 +2,6 @@ pub mod commands;
 pub mod db;
 pub mod models;
 
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -23,7 +17,6 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            greet,
             commands::get_lists,
             commands::create_list,
             commands::update_list,
@@ -36,6 +29,7 @@ pub fn run() {
             commands::toggle_task_complete,
             commands::batch_update_tasks,
             commands::get_tags,
+            commands::get_tags_with_counts,
             commands::create_tag,
             commands::assign_tag,
             commands::remove_tag,

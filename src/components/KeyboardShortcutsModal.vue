@@ -45,7 +45,7 @@ interface ShortcutCategory {
 const essentialShortcuts: Shortcut[] = [
 	{ keys: ["⌘", "N"], description: "Quick Capture (new task modal)" },
 	{ keys: ["⌘", "Shift", "P"], description: "Open Command Palette" },
-	{ keys: ["⌘", "C"], description: "Go to Calendar view" },
+	{ keys: ["⌘", "C"], description: "Toggle Calendar view mode" },
 	{ keys: ["t"], description: "Focus inline add input (current list/view)" },
 	{ keys: ["j", "or", "↓"], description: "Select next task" },
 	{ keys: ["k", "or", "↑"], description: "Select previous task" },
@@ -78,7 +78,7 @@ const shortcutCategories: ShortcutCategory[] = [
 		shortcuts: [
 			{
 				keys: ["⌘", "C"],
-				description: "Go to Calendar view",
+				description: "Toggle Calendar view mode",
 			},
 			{
 				keys: ["⌘", "B"],
@@ -102,15 +102,11 @@ const shortcutCategories: ShortcutCategory[] = [
 		title: "Navigation",
 		shortcuts: [
 			{
-				keys: ["⌘", "C"],
-				description: "Go to Calendar view",
-			},
-			{
-				keys: ["Ctrl", "Tab"],
+				keys: ["Tab"],
 				description: "Navigate to next list or smart view",
 			},
 			{
-				keys: ["Ctrl", "Shift", "Tab"],
+				keys: ["Shift", "Tab"],
 				description: "Navigate to previous list or smart view",
 			},
 			{

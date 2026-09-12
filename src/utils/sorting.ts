@@ -1,4 +1,5 @@
 import type { Task } from "../models/index.ts";
+import { parseDueDateToLocal } from "../services/queryEngine.ts";
 
 export type SortField = "priority" | "due" | "title" | "manual" | "created_at";
 export type SortOrder = "asc" | "desc";
@@ -27,14 +28,14 @@ export function compareByCompletion(a: Task, b: Task): number {
  * desc: 3 -> 2 -> 1 -> null
  */
 export function compareByPriority(a: Task, b: Task, order: SortOrder = "asc"): number {
-	const aP = a.priority;
-	const bP = b.priority;
+	const aPrio = a.priority;
+	const bPrio = b.priority;
 
-	if (aP === bP) return 0;
-	if (aP === null || aP === undefined) return 1;
-	if (bP === null || bP === undefined) return -1;
+	if (aPrio === null && bPrio === null) return 0;
+	if (aPrio === null) return 1;
+	if (bPrio === null) return -1;
 
-	return order === "asc" ? aP - bP : bP - aP;
+	return order === "asc" ? aPrio - bPrio : bPrio - aPrio;
 }
 
 /**
@@ -52,8 +53,10 @@ export function compareByDueDate(a: Task, b: Task, order: SortOrder = "asc"): nu
 	if (!aDue) return 1;
 	if (!bDue) return -1;
 
-	const aTime = new Date(aDue).getTime();
-	const bTime = new Date(bDue).getTime();
+	const aDate = parseDueDateToLocal(aDue);
+	const bDate = parseDueDateToLocal(bDue);
+	const aTime = aDate ? aDate.getTime() : Number.NaN;
+	const bTime = bDate ? bDate.getTime() : Number.NaN;
 
 	if (Number.isNaN(aTime) && Number.isNaN(bTime)) return 0;
 	if (Number.isNaN(aTime)) return 1;

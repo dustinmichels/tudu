@@ -261,7 +261,7 @@ describe("Phase 3: Smart List Query Engine", () => {
 		const thisWeekResults = querySmartList(tasks, "this_week", {
 			now: fixedNow,
 		});
-		expect(thisWeekResults.map((t) => t.id)).toEqual(["1", "2"]);
+		expect(thisWeekResults.map((t) => t.id)).toEqual(["0", "1", "2"]);
 
 		const allResults = querySmartList(tasks, "all");
 		expect(allResults.map((t) => t.id)).toEqual(["0", "1", "2", "3"]);
@@ -311,7 +311,7 @@ describe("Phase 3: Smart List Query Engine", () => {
 		expect(counts.inbox).toEqual({ total: 2, incomplete: 1 });
 		expect(counts.today).toEqual({ total: 3, incomplete: 2 });
 		expect(counts.tomorrow).toEqual({ total: 1, incomplete: 1 });
-		expect(counts.this_week).toEqual({ total: 3, incomplete: 2 });
+		expect(counts.this_week).toEqual({ total: 4, incomplete: 3 });
 		expect(counts.all).toEqual({ total: 4, incomplete: 3 });
 		expect(counts.trash).toEqual({ total: 1, incomplete: 1 });
 		expect(counts.overdue).toEqual({ total: 1, incomplete: 1 });
@@ -396,6 +396,15 @@ describe("Phase 3: Sorting Utilities", () => {
 
 		const sortedDesc = sortByDueDate([tLate, tNoDue, tEarly], "desc");
 		expect(sortedDesc.map((t) => t.id)).toEqual(["late", "early", "no-due"]);
+	});
+
+	test("compareByDueDate handles mixed date-only and ISO timestamps without UTC timezone drift", () => {
+		const tDateOnly = makeTask({ id: "date-only", due: "2026-09-12" });
+		const tEarlierISO = makeTask({ id: "earlier-iso", due: "2026-09-11T12:00:00Z" });
+		const tLaterISO = makeTask({ id: "later-iso", due: "2026-09-13T12:00:00Z" });
+
+		const sorted = sortByDueDate([tLaterISO, tDateOnly, tEarlierISO], "asc");
+		expect(sorted.map((t) => t.id)).toEqual(["earlier-iso", "date-only", "later-iso"]);
 	});
 
 	test("compareByTitle sorts alphabetically case-insensitively", () => {

@@ -1,4 +1,6 @@
-samples/
+# Private sample exports
+samples/*_private.json
+samples/rememberthemilk_dustin.json
 
 # Logs
 logs

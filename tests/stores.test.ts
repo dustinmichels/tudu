@@ -21,6 +21,7 @@ mock.module("@tauri-apps/api/core", () => ({
 
 import { ApiError, api } from "../src/services/api.ts";
 import { useListStore } from "../src/stores/lists.ts";
+import { useTagStore } from "../src/stores/tags.ts";
 import { useTaskStore } from "../src/stores/tasks.ts";
 
 describe("API Service", () => {
@@ -189,6 +190,26 @@ describe("API Service", () => {
 		await api.reminders.delete("r1");
 		expect(invokeCalls[1]?.command).toBe("delete_reminder");
 		expect(invokeCalls[1]?.args).toEqual({ id: "r1" });
+	});
+
+	test("getTagsWithCounts invokes get_tags_with_counts and maps counts", async () => {
+		mockResponses.get_tags_with_counts = [
+			{
+				id: "tag-1",
+				name: "urgent",
+				color: "#ff0000",
+				created_at: "2026-01-01",
+				updated_at: "2026-01-01",
+				deleted_at: null,
+				task_count: 5,
+			},
+		];
+
+		const result = await api.tags.getAllWithCounts();
+		expect(invokeCalls.length).toBe(1);
+		expect(invokeCalls[0]?.command).toBe("get_tags_with_counts");
+		expect(result[0]?.task_count).toBe(5);
+		expect(result[0]?.taskCount).toBe(5);
 	});
 });
 
@@ -576,5 +597,153 @@ describe("Pinia Task Store (useTaskStore)", () => {
 		taskStore.setActiveTask("t1");
 		expect(taskStore.activeTask?.id).toBe("t1");
 		expect(taskStore.activeTask?.completed).toBe(true);
+	});
+
+	test("deleting a list cascades task removal in taskStore and smart views", async () => {
+		const listStore = useListStore();
+		const taskStore = useTaskStore();
+
+		listStore.lists = [
+			{
+				id: "inbox",
+				name: "Inbox",
+				color: null,
+				position: 0,
+				created_at: "2026-01-01",
+				updated_at: "2026-01-01",
+				deleted_at: null,
+			},
+			{
+				id: "work-list",
+				name: "Work",
+				color: null,
+				position: 1,
+				created_at: "2026-01-01",
+				updated_at: "2026-01-01",
+				deleted_at: null,
+			},
+		];
+		listStore.activeListId = "work-list";
+
+		const todayStr = new Date().toISOString().split("T")[0]!;
+		const taskInWork: Task = {
+			id: "tw1",
+			uid: null,
+			list_id: "work-list",
+			parent_id: null,
+			title: "Work Item",
+			description: null,
+			due: todayStr,
+			is_all_day: false,
+			rrule: null,
+			priority: 1,
+			location: null,
+			url: null,
+			completed: false,
+			completed_at: null,
+			created_at: "2026-01-01",
+			updated_at: "2026-01-01",
+			deleted_at: null,
+		};
+		const taskInInbox: Task = {
+			id: "ti1",
+			uid: null,
+			list_id: "inbox",
+			parent_id: null,
+			title: "Inbox Item",
+			description: null,
+			due: todayStr,
+			is_all_day: false,
+			rrule: null,
+			priority: 2,
+			location: null,
+			url: null,
+			completed: false,
+			completed_at: null,
+			created_at: "2026-01-01",
+			updated_at: "2026-01-01",
+			deleted_at: null,
+		};
+
+		taskStore.allTasks = [taskInWork, taskInInbox];
+		taskStore.tasks = [taskInWork];
+
+		expect(taskStore.allTasksList.length).toBe(2);
+		expect(taskStore.todayTasks.length).toBe(2);
+
+		// Mock backend delete_list and subsequent get_tasks returning only remaining active tasks
+		mockResponses.delete_list = null;
+		mockResponses.get_tasks = [taskInInbox];
+
+		await listStore.deleteList("work-list");
+		await taskStore.fetchAllTasks();
+
+		expect(taskStore.allTasks.length).toBe(1);
+		expect(taskStore.allTasks[0]?.id).toBe("ti1");
+		expect(taskStore.allTasksList.some((t) => t.id === "tw1")).toBe(false);
+		expect(taskStore.todayTasks.some((t) => t.id === "tw1")).toBe(false);
+	});
+});
+
+describe("Pinia Tag Store (useTagStore)", () => {
+	beforeEach(() => {
+		setActivePinia(createPinia());
+		mockResponses = {};
+		mockErrors = {};
+		invokeCalls = [];
+	});
+
+	test("fetchTags and loadTags retrieve tags with counts from get_tags_with_counts", async () => {
+		const tagStore = useTagStore();
+		mockResponses.get_tags_with_counts = [
+			{
+				id: "tag-1",
+				name: "urgent",
+				color: "#ff0000",
+				created_at: "2026-01-01",
+				updated_at: "2026-01-01",
+				deleted_at: null,
+				task_count: 3,
+			},
+			{
+				id: "tag-2",
+				name: "backend",
+				color: null,
+				created_at: "2026-01-01",
+				updated_at: "2026-01-01",
+				deleted_at: null,
+				task_count: 0,
+			},
+		];
+
+		const result = await tagStore.loadTags();
+		expect(result.length).toBe(2);
+		expect(invokeCalls[0]?.command).toBe("get_tags_with_counts");
+
+		expect(tagStore.tagsWithCounts.length).toBe(2);
+		// Sorted alphabetically: "backend" then "urgent"
+		expect(tagStore.tagsWithCounts[0]?.name).toBe("backend");
+		expect(tagStore.tagsWithCounts[0]?.taskCount).toBe(0);
+		expect(tagStore.tagsWithCounts[1]?.name).toBe("urgent");
+		expect(tagStore.tagsWithCounts[1]?.taskCount).toBe(3);
+	});
+
+	test("createTag adds tag with 0 count", async () => {
+		const tagStore = useTagStore();
+		mockResponses.create_tag = {
+			id: "tag-new",
+			name: "frontend",
+			color: "#00ff00",
+			created_at: "2026-01-01",
+			updated_at: "2026-01-01",
+			deleted_at: null,
+		};
+
+		const created = await tagStore.createTag("frontend", "#00ff00");
+		expect(created.id).toBe("tag-new");
+		expect(created.taskCount).toBe(0);
+		expect(created.task_count).toBe(0);
+		expect(tagStore.tags.length).toBe(1);
+		expect(tagStore.tagsWithCounts[0]?.taskCount).toBe(0);
 	});
 });

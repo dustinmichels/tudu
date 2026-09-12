@@ -11,6 +11,7 @@ import type {
 	OpenTaskDocument,
 	Reminder,
 	Tag,
+	TagWithCount,
 	Task,
 	TaskDetail,
 	UpdateListInput,
@@ -153,6 +154,21 @@ export async function getTags(): Promise<Tag[]> {
 	return safeInvoke<Tag[]>("get_tags");
 }
 
+export async function getTagsWithCounts(): Promise<TagWithCount[]> {
+	const res =
+		await safeInvoke<Array<Tag & { task_count?: number; taskCount?: number }>>(
+			"get_tags_with_counts",
+		);
+	return (res ?? []).map((t) => {
+		const count = t.task_count ?? t.taskCount ?? 0;
+		return {
+			...t,
+			task_count: count,
+			taskCount: count,
+		};
+	});
+}
+
 export async function createTag(name: string, color?: string | null): Promise<Tag> {
 	return safeInvoke<Tag>("create_tag", {
 		name,
@@ -245,6 +261,7 @@ export const api = {
 	},
 	tags: {
 		getAll: getTags,
+		getAllWithCounts: getTagsWithCounts,
 		create: createTag,
 		assign: assignTag,
 		remove: removeTag,

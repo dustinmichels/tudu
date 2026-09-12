@@ -54,6 +54,7 @@ export interface Task {
 	geo_longitude?: number | null;
 	geo?: GeoLocation | null;
 	extra?: Record<string, unknown> | null;
+	tags?: Tag[];
 	created_at: string;
 	updated_at: string;
 	deleted_at: string | null;
@@ -72,6 +73,11 @@ export interface Tag {
 	created_at: string;
 	updated_at: string;
 	deleted_at: string | null;
+}
+
+export interface TagWithCount extends Tag {
+	task_count: number;
+	taskCount: number;
 }
 
 export interface Note {

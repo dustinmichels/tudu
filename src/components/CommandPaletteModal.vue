@@ -78,7 +78,6 @@ const commands = computed<CommandItem[]>(() => {
 			{ id: "tomorrow", name: "Tomorrow", icon: Calendar },
 			{ id: "this_week", name: "This Week", icon: Calendar },
 			{ id: "overdue", name: "Overdue", icon: AlertCircle },
-			{ id: "calendar", name: "Calendar", icon: CalendarDays, shortcut: "Cmd+C" },
 			{ id: "trash", name: "Trash", icon: Trash2 },
 		];
 
@@ -91,10 +90,7 @@ const commands = computed<CommandItem[]>(() => {
 				icon: sv.icon,
 				action: () => {
 					filterStore.setTagFilter(null);
-					filterStore.setListFilter(null);
-					filterStore.setSmartView(sv.id === "calendar" ? null : sv.id);
 					listStore.setActiveView(sv.id);
-					listStore.setActiveList(null);
 					taskStore.setActiveTask(null);
 				},
 			});
@@ -108,9 +104,6 @@ const commands = computed<CommandItem[]>(() => {
 				icon: Folder,
 				action: () => {
 					filterStore.setTagFilter(null);
-					filterStore.setSmartView(null);
-					listStore.setActiveView(null);
-					filterStore.setListFilter(list.id);
 					listStore.setActiveList(list.id);
 					taskStore.setActiveTask(null);
 				},
@@ -124,8 +117,6 @@ const commands = computed<CommandItem[]>(() => {
 				category: "Tags",
 				icon: TagIcon,
 				action: () => {
-					filterStore.setSmartView(null);
-					filterStore.setListFilter(null);
 					listStore.setActiveView(null);
 					listStore.setActiveList(null);
 					filterStore.setTagFilter(tag.name);
@@ -153,7 +144,7 @@ const commands = computed<CommandItem[]>(() => {
 			id: "action-toggle-complete",
 			title: "Toggle Selected Task Completion",
 			category: "Tasks",
-			shortcut: "Enter",
+			shortcut: "c",
 			icon: CheckSquare,
 			action: () => {
 				if (taskStore.activeTaskId) {
@@ -269,18 +260,13 @@ const commands = computed<CommandItem[]>(() => {
 			},
 		},
 		{
-			id: "action-view-calendar",
-			title: "Go to Calendar View",
+			id: "action-toggle-calendar",
+			title: uiStore.isCalendarView ? "Switch to List View" : "Switch to Calendar View",
 			category: "View",
 			shortcut: "Cmd+C",
 			icon: CalendarDays,
 			action: () => {
-				filterStore.setTagFilter(null);
-				filterStore.setListFilter(null);
-				filterStore.setSmartView(null);
-				listStore.setActiveView("calendar");
-				listStore.setActiveList(null);
-				taskStore.setActiveTask(null);
+				uiStore.toggleCalendarView();
 			},
 		},
 		{
@@ -354,7 +340,6 @@ const commands = computed<CommandItem[]>(() => {
 		{ id: "tomorrow" as DefaultView, name: "Tomorrow", icon: Calendar },
 		{ id: "this_week" as DefaultView, name: "This Week", icon: Calendar },
 		{ id: "overdue" as DefaultView, name: "Overdue", icon: AlertCircle },
-		{ id: "calendar" as DefaultView, name: "Calendar", icon: CalendarDays, shortcut: "Cmd+C" },
 		{ id: "trash" as DefaultView, name: "Trash", icon: Trash2 },
 	]) {
 		items.push({
@@ -365,10 +350,7 @@ const commands = computed<CommandItem[]>(() => {
 			icon: sv.icon,
 			action: () => {
 				filterStore.setTagFilter(null);
-				filterStore.setListFilter(null);
-				filterStore.setSmartView(sv.id === "calendar" ? null : sv.id);
 				listStore.setActiveView(sv.id);
-				listStore.setActiveList(null);
 				taskStore.setActiveTask(null);
 			},
 		});

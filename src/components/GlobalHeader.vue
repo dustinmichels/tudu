@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {
+	CalendarDays,
 	CheckCircle2,
 	Circle,
 	Cloud,
@@ -8,9 +9,9 @@ import {
 	Command as CommandIcon,
 	FileUp,
 	Keyboard as KeyboardIcon,
+	List,
 	Menu as MenuIcon,
 	Search,
-	Settings,
 	X,
 } from "lucide-vue-next";
 import { computed, onMounted, ref } from "vue";
@@ -77,21 +78,26 @@ const syncLabel = computed(() => {
 		case "syncing":
 			return "Syncing...";
 		case "offline":
-			return "Offline only";
+			return "Local Storage";
 		case "error":
-			return "Sync error";
+			return "Sync Error";
 		default:
 			return "Synced";
 	}
 });
 
-function handleTriggerSync() {
-	if (uiStore.syncStatus === "offline") return;
-	uiStore.setSyncStatus("syncing");
-	setTimeout(() => {
-		uiStore.setSyncStatus("synced");
-	}, 600);
-}
+const syncTooltip = computed(() => {
+	switch (uiStore.syncStatus) {
+		case "syncing":
+			return "Syncing with remote database...";
+		case "offline":
+			return "Local Storage (SQLite) - Cloud sync coming in a future release";
+		case "error":
+			return "Database synchronization error";
+		default:
+			return "Synced with Turso Cloud";
+	}
+});
 </script>
 
 <template>
@@ -139,8 +145,45 @@ function handleTriggerSync() {
 			</div>
 		</div>
 
-		<!-- Right Section: Sync Status & Menu -->
+		<!-- Right Section: View Mode, Sync Status & Menu -->
 		<div data-tauri-drag-region class="flex items-center gap-1.5 sm:gap-2 shrink-0">
+			<!-- View Mode Toggle: List vs Calendar -->
+			<div
+				class="flex items-center rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-200/60 dark:bg-zinc-900/80 p-0.5 text-xs shadow-2xs"
+			>
+				<button
+					type="button"
+					@click="uiStore.setCalendarView(false)"
+					:class="[
+						!uiStore.isCalendarView
+							? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-2xs font-semibold'
+							: 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200',
+					]"
+					class="flex items-center gap-1 px-2 py-0.5 rounded-md transition-all cursor-pointer"
+					title="List view"
+				>
+					<List class="w-3.5 h-3.5" />
+					<span class="hidden md:inline">List</span>
+				</button>
+				<button
+					type="button"
+					@click="uiStore.setCalendarView(true)"
+					:class="[
+						uiStore.isCalendarView
+							? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-2xs font-semibold'
+							: 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200',
+					]"
+					class="flex items-center gap-1 px-2 py-0.5 rounded-md transition-all cursor-pointer"
+					title="Calendar view (⌘C)"
+				>
+					<CalendarDays
+						class="w-3.5 h-3.5"
+						:class="uiStore.isCalendarView ? 'text-teal-500' : ''"
+					/>
+					<span class="hidden md:inline">Calendar</span>
+				</button>
+			</div>
+
 			<!-- Global Toggle: Show / Hide Completed Tasks -->
 			<button
 				type="button"
@@ -206,45 +249,19 @@ function handleTriggerSync() {
 					</button>
 				</div>
 			</div>
-			<!-- Sync Status Button -->
-			<button
-				type="button"
-				:disabled="uiStore.syncStatus === 'offline'"
-				@click="handleTriggerSync"
-				:title="
-					uiStore.syncStatus === 'offline'
-						? 'Offline only (local database; cloud sync coming in Phase 9)'
-						: `Status: ${syncLabel} (click to sync)`
-				"
-				class="flex items-center gap-1.5 px-2 py-1 text-xs rounded-md font-medium border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 text-zinc-600 dark:text-zinc-400 transition-colors"
-				:class="
-					uiStore.syncStatus === 'offline'
-						? 'opacity-60 cursor-default'
-						: 'hover:bg-zinc-200 dark:hover:bg-zinc-800 cursor-pointer'
-				"
+			<!-- Sync / Storage Status Indicator -->
+			<div
+				:title="syncTooltip"
+				class="flex items-center gap-1.5 px-2 py-1 text-xs rounded-md font-medium border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 text-zinc-600 dark:text-zinc-400 select-none cursor-default"
 			>
-				<RefreshCw
-					v-if="uiStore.syncStatus === 'syncing'"
-					class="w-3.5 h-3.5 text-emerald-500 animate-spin"
-				/>
-				<CloudAlert v-else-if="uiStore.syncStatus === 'error'" class="w-3.5 h-3.5 text-amber-500" />
 				<CloudOff
-					v-else-if="uiStore.syncStatus === 'offline'"
+					v-if="uiStore.syncStatus === 'offline'"
 					class="w-3.5 h-3.5 text-zinc-400 dark:text-zinc-500"
 				/>
+				<CloudAlert v-else-if="uiStore.syncStatus === 'error'" class="w-3.5 h-3.5 text-amber-500" />
 				<Cloud v-else class="w-3.5 h-3.5 text-emerald-500" />
 				<span class="hidden md:inline">{{ syncLabel }}</span>
-			</button>
-
-			<!-- Settings Button -->
-			<button
-				type="button"
-				@click="uiStore.toggleSettings()"
-				title="Settings"
-				class="p-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 transition-colors cursor-pointer"
-			>
-				<Settings class="w-4 h-4" />
-			</button>
+			</div>
 		</div>
 	</header>
 </template>

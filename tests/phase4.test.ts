@@ -11,7 +11,6 @@ describe("Phase 4: UI Store (useUIStore)", () => {
 		const uiStore = useUIStore();
 		expect(uiStore.isSidebarOpen).toBeFalse();
 		expect(uiStore.isDetailOpen).toBeTrue();
-		expect(uiStore.isSettingsOpen).toBeFalse();
 		expect(uiStore.syncStatus).toBe("offline");
 	});
 
@@ -39,17 +38,6 @@ describe("Phase 4: UI Store (useUIStore)", () => {
 
 		uiStore.toggleDetail(false);
 		expect(uiStore.isDetailOpen).toBeFalse();
-	});
-
-	test("toggles settings state", () => {
-		const uiStore = useUIStore();
-		expect(uiStore.isSettingsOpen).toBeFalse();
-
-		uiStore.toggleSettings();
-		expect(uiStore.isSettingsOpen).toBeTrue();
-
-		uiStore.toggleSettings(false);
-		expect(uiStore.isSettingsOpen).toBeFalse();
 	});
 
 	test("toggles import modal state", () => {

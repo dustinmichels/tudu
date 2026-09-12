@@ -13,6 +13,8 @@ import {
 	getSmartListCounts,
 	isOverdue,
 	isThisWeek,
+	isThisWeekOrOverdue,
+	isToday,
 	isTodayOrOverdue,
 	isTomorrow,
 	parseDueDateToLocal,
@@ -24,10 +26,13 @@ import {
 import { type SortOptions, sortTasks } from "../utils/sorting.ts";
 import { useFilterStore } from "./filters.ts";
 import { useListStore } from "./lists.ts";
+import { useTagStore } from "./tags.ts";
 
 export {
 	isOverdue,
 	isThisWeek,
+	isThisWeekOrOverdue,
+	isToday,
 	isTodayOrOverdue,
 	isTomorrow,
 	parseDueDateToLocal,
@@ -122,7 +127,7 @@ export const useTaskStore = defineStore("tasks", () => {
 			const criteria: QueryCriteria = {
 				smartView: null,
 				listId: null,
-				completion: filterStore.includeCompleted ? "all" : "incomplete",
+				completion: includeCompleted.value ? "all" : "incomplete",
 				searchQuery: filterStore.searchQuery,
 				sort: filterStore.sortOptions,
 			};
@@ -130,11 +135,11 @@ export const useTaskStore = defineStore("tasks", () => {
 		}
 
 		const criteria: QueryCriteria = {
-			smartView: filterStore.smartView,
-			listId: filterStore.selectedListId ?? listStore.activeListId,
+			smartView: listStore.activeView,
+			listId: listStore.activeListId,
 			inboxListId: listStore.inboxList?.id,
 			tag: filterStore.selectedTag,
-			completion: filterStore.includeCompleted ? "all" : "incomplete",
+			completion: includeCompleted.value ? "all" : "incomplete",
 			searchQuery: filterStore.searchQuery,
 			sort: filterStore.sortOptions,
 		};
@@ -159,6 +164,11 @@ export const useTaskStore = defineStore("tasks", () => {
 
 	function setIncludeCompleted(value: boolean) {
 		includeCompleted.value = value;
+	}
+
+	function toggleIncludeCompleted(): boolean {
+		includeCompleted.value = !includeCompleted.value;
+		return includeCompleted.value;
 	}
 	async function fetchAllTasks(): Promise<Task[]> {
 		try {
@@ -289,6 +299,7 @@ export const useTaskStore = defineStore("tasks", () => {
 				const allIdx = allTasks.value.findIndex((t) => t.id === id);
 				if (allIdx !== -1) allTasks.value[allIdx] = updated;
 			}
+			void useTagStore().fetchTags();
 			return updated;
 		} catch (err) {
 			// Rollback on failure if no newer mutation occurred
@@ -508,6 +519,7 @@ export const useTaskStore = defineStore("tasks", () => {
 			if (activeTaskId.value && idsToRemove.has(activeTaskId.value)) {
 				activeTaskId.value = null;
 			}
+			void useTagStore().fetchTags();
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			error.value = msg;
@@ -543,6 +555,9 @@ export const useTaskStore = defineStore("tasks", () => {
 				);
 			} else {
 				tasks.value = tasks.value.map((t) => updatedMap.get(t.id) ?? t);
+			}
+			if (options.completed !== undefined) {
+				void useTagStore().fetchTags();
 			}
 			return updated;
 		} catch (err) {
@@ -600,6 +615,7 @@ export const useTaskStore = defineStore("tasks", () => {
 		getListOverdueCount,
 		setActiveTask,
 		setIncludeCompleted,
+		toggleIncludeCompleted,
 		fetchAllTasks,
 		fetchTasks,
 		addTask,

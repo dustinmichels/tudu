@@ -2,30 +2,49 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import type { SmartView } from "../services/queryEngine.ts";
 import type { SortField, SortOptions, SortOrder } from "../utils/sorting.ts";
+import { useListStore } from "./lists.ts";
+import { useTaskStore } from "./tasks.ts";
 
 export type ActiveFilterType = "smart_view" | "list" | "tag" | "none";
 
 export const useFilterStore = defineStore("filters", () => {
-	const selectedListId = ref<string | null>(null);
 	const selectedTag = ref<string | null>(null);
-	const smartView = ref<SmartView | null>(null);
-	const includeCompleted = ref<boolean>(true);
 	const searchQuery = ref<string>("");
 	const sortBy = ref<SortField>("priority");
 	const sortOrder = ref<SortOrder>("asc");
 
+	const listStore = useListStore();
+	const taskStore = useTaskStore();
+
+	// Navigation state: listStore is the single authoritative source of truth
+	const selectedListId = computed({
+		get: () => listStore.activeListId,
+		set: (id: string | null) => listStore.setActiveList(id),
+	});
+
+	const smartView = computed({
+		get: () => listStore.activeView as SmartView | null,
+		set: (view: SmartView | null) => listStore.setActiveView(view),
+	});
+
+	// Completion visibility: taskStore is the single authoritative source of truth
+	const includeCompleted = computed({
+		get: () => taskStore.includeCompleted,
+		set: (val: boolean) => taskStore.setIncludeCompleted(val),
+	});
+
 	const hasActiveFilter = computed<boolean>(() => {
 		return (
-			selectedListId.value !== null ||
+			listStore.activeListId !== null ||
 			selectedTag.value !== null ||
-			smartView.value !== null ||
+			listStore.activeView !== null ||
 			searchQuery.value.trim() !== ""
 		);
 	});
 
 	const activeFilterType = computed<ActiveFilterType>(() => {
-		if (smartView.value !== null) return "smart_view";
-		if (selectedListId.value !== null) return "list";
+		if (listStore.activeView !== null) return "smart_view";
+		if (listStore.activeListId !== null) return "list";
 		if (selectedTag.value !== null) return "tag";
 		return "none";
 	});
@@ -37,21 +56,15 @@ export const useFilterStore = defineStore("filters", () => {
 	}));
 
 	function isSmartViewActive(view: SmartView): boolean {
-		return smartView.value === view;
+		return listStore.activeView === view;
 	}
 
 	function setListFilter(listId: string | null) {
-		selectedListId.value = listId;
-		if (listId !== null) {
-			smartView.value = null;
-		}
+		listStore.setActiveList(listId);
 	}
 
 	function setSmartView(view: SmartView | null) {
-		smartView.value = view;
-		if (view !== null) {
-			selectedListId.value = null;
-		}
+		listStore.setActiveView(view);
 	}
 
 	function setTagFilter(tag: string | null) {
@@ -59,12 +72,11 @@ export const useFilterStore = defineStore("filters", () => {
 	}
 
 	function setIncludeCompleted(include: boolean) {
-		includeCompleted.value = include;
+		taskStore.setIncludeCompleted(include);
 	}
 
 	function toggleIncludeCompleted(): boolean {
-		includeCompleted.value = !includeCompleted.value;
-		return includeCompleted.value;
+		return taskStore.toggleIncludeCompleted();
 	}
 
 	function setSearchQuery(query: string) {
@@ -79,10 +91,10 @@ export const useFilterStore = defineStore("filters", () => {
 	}
 
 	function resetFilters() {
-		selectedListId.value = null;
+		listStore.setActiveList(null);
+		listStore.setActiveView(null);
 		selectedTag.value = null;
-		smartView.value = null;
-		includeCompleted.value = true;
+		taskStore.setIncludeCompleted(true);
 		searchQuery.value = "";
 		sortBy.value = "priority";
 		sortOrder.value = "asc";

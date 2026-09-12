@@ -3,7 +3,6 @@ import {
 	AlertCircle,
 	Bike,
 	Calendar,
-	CalendarDays,
 	CalendarRange,
 	CheckCircle2,
 	CheckSquare,
@@ -99,13 +98,6 @@ const smartViews = computed(() => [
 		count: taskStore.countOverdue,
 	},
 	{
-		id: "calendar" as DefaultView,
-		name: "Calendar",
-		icon: CalendarDays,
-		iconColor: "text-teal-500",
-		count: 0,
-	},
-	{
 		id: "trash" as DefaultView,
 		name: "Trash",
 		icon: Trash2,
@@ -122,9 +114,6 @@ function handleCloseMobileSidebar() {
 
 function handleSelectSmartView(view: DefaultView) {
 	filterStore.setTagFilter(null);
-	filterStore.setListFilter(null);
-	listStore.setActiveList(null);
-	filterStore.setSmartView(view === "calendar" ? null : view);
 	listStore.setActiveView(view);
 	taskStore.setActiveTask(null);
 	handleCloseMobileSidebar();
@@ -132,17 +121,12 @@ function handleSelectSmartView(view: DefaultView) {
 
 function handleSelectList(id: string) {
 	filterStore.setTagFilter(null);
-	filterStore.setSmartView(null);
-	listStore.setActiveView(null);
-	filterStore.setListFilter(id);
 	listStore.setActiveList(id);
 	taskStore.setActiveTask(null);
 	handleCloseMobileSidebar();
 }
 
 function handleSelectTag(tagName: string) {
-	filterStore.setSmartView(null);
-	filterStore.setListFilter(null);
 	listStore.setActiveView(null);
 	listStore.setActiveList(null);
 	filterStore.setTagFilter(tagName);
@@ -187,14 +171,10 @@ async function handleCreateList() {
 
 	try {
 		isCreating.value = true;
-		const created = await listStore.createList(name, null, newListIcon.value);
+		await listStore.createList(name, null, newListIcon.value);
 		newListName.value = "";
 		newListIcon.value = DEFAULT_LIST_ICON;
 		filterStore.setTagFilter(null);
-		filterStore.setSmartView(null);
-		listStore.setActiveView(null);
-		filterStore.setListFilter(created.id);
-		listStore.setActiveList(created.id);
 		taskStore.setActiveTask(null);
 	} catch (err) {
 		console.error("Failed to create list:", err);
@@ -236,6 +216,7 @@ async function handleDeleteList(event: MouseEvent, id: string) {
 
 	try {
 		await listStore.deleteList(id);
+		await taskStore.fetchAllTasks();
 	} catch (err) {
 		console.error("Failed to delete list:", err);
 	}
@@ -298,7 +279,7 @@ async function handleDeleteList(event: MouseEvent, id: string) {
 						:key="view.id"
 						type="button"
 						@click="handleSelectSmartView(view.id)"
-						:title="view.id === 'calendar' ? 'Calendar (⌘C)' : view.name"
+						:title="view.name"
 						class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer text-left"
 						:class="[
 							listStore.activeView === view.id && !filterStore.selectedTag
@@ -312,12 +293,6 @@ async function handleDeleteList(event: MouseEvent, id: string) {
 						</div>
 
 						<div class="flex items-center gap-1.5 shrink-0">
-							<kbd
-								v-if="view.id === 'calendar'"
-								class="text-[10px] font-mono text-zinc-400 dark:text-zinc-500"
-							>
-								⌘C
-							</kbd>
 							<!-- Incomplete task badge -->
 							<span
 								v-if="view.count > 0"

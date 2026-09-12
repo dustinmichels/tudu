@@ -15,7 +15,6 @@ export type DefaultView =
 	| "this_week"
 	| "all"
 	| "trash"
-	| "calendar"
 	| "overdue";
 
 export const useListStore = defineStore("lists", () => {

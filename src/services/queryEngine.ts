@@ -50,6 +50,22 @@ export function isOverdue(due: string | null | undefined, now: Date = new Date()
 }
 
 /**
+ * Check if a task's due date falls on today.
+ */
+export function isToday(due: string | null | undefined, now: Date = new Date()): boolean {
+	const d = parseDueDateToLocal(due);
+	if (!d) return false;
+
+	const startOfToday = new Date(now);
+	startOfToday.setHours(0, 0, 0, 0);
+
+	const endOfToday = new Date(now);
+	endOfToday.setHours(23, 59, 59, 999);
+
+	return d >= startOfToday && d <= endOfToday;
+}
+
+/**
  * Check if a task's due date is today or overdue.
  */
 export function isTodayOrOverdue(due: string | null | undefined, now: Date = new Date()): boolean {
@@ -97,6 +113,23 @@ export function isThisWeek(due: string | null | undefined, now: Date = new Date(
 }
 
 /**
+ * Check if a task's due date is within the next 7 days or overdue.
+ */
+export function isThisWeekOrOverdue(
+	due: string | null | undefined,
+	now: Date = new Date(),
+): boolean {
+	const d = parseDueDateToLocal(due);
+	if (!d) return false;
+
+	const endOf7Days = new Date(now);
+	endOf7Days.setDate(endOf7Days.getDate() + 7);
+	endOf7Days.setHours(23, 59, 59, 999);
+
+	return d <= endOf7Days;
+}
+
+/**
  * Predicate to check if a task matches a specific SmartView.
  */
 export function matchesSmartView(
@@ -121,13 +154,13 @@ export function matchesSmartView(
 			return context.inboxListId != null && task.list_id === context.inboxListId;
 
 		case "today":
-			return isTodayOrOverdue(task.due, now);
+			return task.completed ? isToday(task.due, now) : isTodayOrOverdue(task.due, now);
 
 		case "tomorrow":
 			return isTomorrow(task.due, now);
 
 		case "this_week":
-			return isThisWeek(task.due, now);
+			return task.completed ? isThisWeek(task.due, now) : isThisWeekOrOverdue(task.due, now);
 
 		case "overdue":
 			return !task.completed && isOverdue(task.due, now);

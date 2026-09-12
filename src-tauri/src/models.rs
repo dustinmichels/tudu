@@ -53,6 +53,8 @@ pub struct Task {
     pub geo_longitude: Option<f64>,
     #[serde(default)]
     pub extra: Option<serde_json::Value>,
+    #[serde(default)]
+    pub tags: Vec<Tag>,
     pub created_at: String,
     pub updated_at: String,
     pub deleted_at: Option<String>,
@@ -62,38 +64,77 @@ fn default_status() -> String {
     "needs_action".to_string()
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GeoLocation {
+    pub latitude: f64,
+    pub longitude: f64,
+}
+
+pub fn double_option<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: Deserialize<'de>,
+    D: Deserializer<'de>,
+{
+    Deserialize::deserialize(deserializer).map(Some)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct UpdateTaskInput {
     pub id: String,
-    pub uid: Option<String>,
-    pub parent_id: Option<String>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub uid: Option<Option<String>>,
+    #[serde(default, alias = "parentId", deserialize_with = "double_option")]
+    pub parent_id: Option<Option<String>>,
+    #[serde(default, alias = "listId")]
     pub list_id: Option<String>,
+    #[serde(default)]
     pub title: Option<String>,
-    pub description: Option<String>,
-    pub due: Option<String>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub description: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub due: Option<Option<String>>,
+    #[serde(default, alias = "isAllDay")]
     pub is_all_day: Option<bool>,
-    pub rrule: Option<String>,
-    pub priority: Option<i64>,
-    pub location: Option<String>,
-    pub url: Option<String>,
+    #[serde(default, alias = "repeats", deserialize_with = "double_option")]
+    pub rrule: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub priority: Option<Option<i64>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub location: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub url: Option<Option<String>>,
+    #[serde(default)]
     pub completed: Option<bool>,
-    pub completed_at: Option<String>,
+    #[serde(default, alias = "completedAt", deserialize_with = "double_option")]
+    pub completed_at: Option<Option<String>>,
+    #[serde(default)]
     pub status: Option<String>,
-    pub start: Option<String>,
-    pub duration: Option<String>,
-    pub timezone: Option<String>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub start: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub duration: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub timezone: Option<Option<String>>,
+    #[serde(default, alias = "percentComplete")]
     pub percent_complete: Option<i64>,
-    pub color: Option<String>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub color: Option<Option<String>>,
+    #[serde(default)]
     pub position: Option<i64>,
-    pub geo_latitude: Option<f64>,
-    pub geo_longitude: Option<f64>,
-    pub extra: Option<serde_json::Value>,
+    #[serde(default, alias = "geoLatitude", deserialize_with = "double_option")]
+    pub geo_latitude: Option<Option<f64>>,
+    #[serde(default, alias = "geoLongitude", deserialize_with = "double_option")]
+    pub geo_longitude: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub geo: Option<Option<GeoLocation>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub extra: Option<Option<serde_json::Value>>,
     #[serde(default)]
     pub created_at: Option<String>,
     #[serde(default)]
     pub updated_at: Option<String>,
-    #[serde(default)]
-    pub deleted_at: Option<String>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub deleted_at: Option<Option<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -104,6 +145,17 @@ pub struct Tag {
     pub created_at: String,
     pub updated_at: String,
     pub deleted_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TagWithCount {
+    pub id: String,
+    pub name: String,
+    pub color: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub deleted_at: Option<String>,
+    pub task_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -135,9 +187,21 @@ pub struct Reminder {
 pub struct TaskDetail {
     #[serde(flatten)]
     pub task: Task,
-    pub tags: Vec<Tag>,
     pub notes: Vec<Note>,
     pub subtasks: Vec<Task>,
+}
+
+impl std::ops::Deref for TaskDetail {
+    type Target = Task;
+    fn deref(&self) -> &Self::Target {
+        &self.task
+    }
+}
+
+impl std::ops::DerefMut for TaskDetail {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.task
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -150,23 +214,9 @@ pub struct BatchUpdateTasksInput {
     #[serde(default, deserialize_with = "double_option")]
     pub priority: Option<Option<i64>>,
 }
-
-fn double_option<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
-where
-    T: Deserialize<'de>,
-    D: Deserializer<'de>,
-{
-    Deserialize::deserialize(deserializer).map(Some)
-}
 // ---------------------------------------------------------------------------
 // OpenTask v1.0 Interchange Specification Types (matching opentask-v1.json)
 // ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct GeoLocation {
-    pub latitude: f64,
-    pub longitude: f64,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OpenTaskChecklistItem {
@@ -385,5 +435,36 @@ mod tests {
         let parsed_priority: BatchUpdateTasksInput =
             serde_json::from_str(json_priority).expect("parse concrete priority");
         assert_eq!(parsed_priority.priority, Some(Some(1)));
+    }
+
+    #[test]
+    fn test_update_task_input_serde() {
+        // Test omitted nullable vs explicit null vs concrete value
+        let json_data = r#"{
+            "id": "t1",
+            "title": "New Title",
+            "due": null,
+            "priority": 2,
+            "parentId": null,
+            "isAllDay": true,
+            "geo": { "latitude": 37.77, "longitude": -122.41 },
+            "percentComplete": 75
+        }"#;
+        let parsed: UpdateTaskInput = serde_json::from_str(json_data).expect("parse UpdateTaskInput");
+        assert_eq!(parsed.id, "t1");
+        assert_eq!(parsed.title, Some("New Title".to_string()));
+        assert_eq!(parsed.due, Some(None)); // explicitly null
+        assert_eq!(parsed.description, None); // omitted
+        assert_eq!(parsed.priority, Some(Some(2))); // concrete value
+        assert_eq!(parsed.parent_id, Some(None)); // alias parentId -> parent_id, explicitly null
+        assert_eq!(parsed.is_all_day, Some(true)); // alias isAllDay -> is_all_day
+        assert_eq!(parsed.percent_complete, Some(75)); // alias percentComplete
+        assert_eq!(
+            parsed.geo,
+            Some(Some(GeoLocation {
+                latitude: 37.77,
+                longitude: -122.41,
+            }))
+        );
     }
 }

@@ -277,27 +277,27 @@ describe("Keyboard Shortcuts & Navigation", () => {
 		const listStore = useListStore();
 		const filterStore = useFilterStore();
 		const taskStore = useTaskStore();
+		const uiStore = useUIStore();
 
 		// Set initial state: active list and tag filter
 		listStore.setActiveList("list-123");
 		filterStore.setTagFilter("urgent");
-		filterStore.setSmartView("today");
 		taskStore.setActiveTask("t1");
 
 		expect(listStore.activeListId).toBe("list-123");
 		expect(filterStore.selectedTag).toBe("urgent");
-		expect(filterStore.smartView).toBe("today");
+		expect(filterStore.smartView).toBe(null);
 		expect(taskStore.activeTaskId).toBe("t1");
 
 		// Trigger Calendar shortcut navigation (Cmd+C action)
 		filterStore.setTagFilter(null);
-		filterStore.setListFilter(null);
-		filterStore.setSmartView(null);
-		listStore.setActiveView("calendar");
+		listStore.setActiveView(null);
 		listStore.setActiveList(null);
+		uiStore.setCalendarView(true);
 		taskStore.setActiveTask(null);
 
-		expect(listStore.activeView).toBe("calendar");
+		expect(uiStore.isCalendarView).toBe(true);
+		expect(listStore.activeView).toBe(null);
 		expect(listStore.activeListId).toBe(null);
 		expect(filterStore.selectedTag).toBe(null);
 		expect(filterStore.selectedListId).toBe(null);
@@ -361,5 +361,291 @@ describe("Keyboard Shortcuts & Navigation", () => {
 				hasSelection: false,
 			}),
 		).toBe(true);
+	});
+
+	it("useKeyboardShortcuts: isEditingInput correctly identifies form inputs", () => {
+		const { isEditingInput } = require("../src/composables/useKeyboardShortcuts.ts");
+		expect(isEditingInput(null)).toBe(false);
+		expect(isEditingInput({} as any)).toBe(false);
+
+		expect(isEditingInput({ tagName: "INPUT" } as any)).toBe(true);
+		expect(isEditingInput({ tagName: "TEXTAREA" } as any)).toBe(true);
+		expect(isEditingInput({ tagName: "SELECT" } as any)).toBe(true);
+		expect(isEditingInput({ tagName: "DIV", isContentEditable: true } as any)).toBe(true);
+		expect(isEditingInput({ tagName: "DIV", isContentEditable: false } as any)).toBe(false);
+	});
+
+	it("useKeyboardShortcuts: handleEscape closes topmost modals first before deselecting task", () => {
+		const { handleEscape } = require("../src/composables/useKeyboardShortcuts.ts");
+		const uiStore = useUIStore();
+		const taskStore = useTaskStore();
+
+		taskStore.setActiveTask("task-123");
+		uiStore.toggleCommandPalette(true);
+
+		// With command palette open, escape closes command palette first, keeping active task
+		const handled1 = handleEscape(uiStore, taskStore);
+		expect(handled1).toBe(true);
+		expect(uiStore.isCommandPaletteOpen).toBe(false);
+		expect(taskStore.activeTaskId).toBe("task-123");
+
+		// Next escape deselects active task and closes detail panel
+		uiStore.toggleDetail(true);
+		const handled2 = handleEscape(uiStore, taskStore);
+		expect(handled2).toBe(true);
+		expect(taskStore.activeTaskId).toBe(null);
+		expect(uiStore.isDetailOpen).toBe(false);
+
+		// Next escape with nothing open returns false
+		const handled3 = handleEscape(uiStore, taskStore);
+		expect(handled3).toBe(false);
+	});
+
+	it("handleNavigationKey: navigates forward through views and custom lists with Tab and wraps around", () => {
+		const { handleNavigationKey } = require("../src/composables/useKeyboardShortcuts.ts");
+		const listStore = useListStore();
+		const filterStore = useFilterStore();
+		const uiStore = useUIStore();
+		const taskStore = useTaskStore();
+
+		listStore.lists = [
+			{
+				id: "inbox-id",
+				name: "Inbox",
+				color: "#3b82f6",
+				position: 0,
+				created_at: "",
+				updated_at: "",
+				deleted_at: null,
+			},
+			{
+				id: "work-id",
+				name: "Work",
+				color: "#10b981",
+				position: 1,
+				created_at: "",
+				updated_at: "",
+				deleted_at: null,
+			},
+			{
+				id: "personal-id",
+				name: "Personal",
+				color: "#6366f1",
+				position: 2,
+				created_at: "",
+				updated_at: "",
+				deleted_at: null,
+			},
+		];
+
+		// Helper to create mock Tab event
+		function tabEvent(shift = false, ctrl = false, target: any = null) {
+			let prevented = false;
+			return {
+				key: "Tab",
+				shiftKey: shift,
+				ctrlKey: ctrl,
+				metaKey: false,
+				altKey: false,
+				target,
+				preventDefault: () => {
+					prevented = true;
+				},
+				get defaultPrevented() {
+					return prevented;
+				},
+			} as unknown as KeyboardEvent;
+		}
+
+		// Initial: on Home (no selection) -> Tab goes to first smart view ('inbox')
+		expect(listStore.activeView).toBe(null);
+		expect(listStore.activeListId).toBe(null);
+		const e1 = tabEvent(false);
+		const res1 = handleNavigationKey(e1, listStore, filterStore, uiStore, taskStore);
+		expect(res1).toBe(true);
+		expect(e1.defaultPrevented).toBe(true);
+		expect(listStore.activeView).toBe("inbox");
+		expect(listStore.activeListId).toBe(null);
+
+		// Cycle forward through all views and custom lists
+		const expectedOrder = [
+			{ view: "all", list: null },
+			{ view: "today", list: null },
+			{ view: "tomorrow", list: null },
+			{ view: "this_week", list: null },
+			{ view: "overdue", list: null },
+			{ view: "trash", list: null },
+			{ view: null, list: "work-id" },
+			{ view: null, list: "personal-id" },
+			{ view: "inbox", list: null }, // wrap back to inbox
+		];
+
+		for (const step of expectedOrder) {
+			const ev = tabEvent(false);
+			const handled = handleNavigationKey(ev, listStore, filterStore, uiStore, taskStore);
+			expect(handled).toBe(true);
+			expect(ev.defaultPrevented).toBe(true);
+			expect(listStore.activeView).toBe(step.view as any);
+			expect(listStore.activeListId).toBe(step.list);
+		}
+	});
+
+	it("handleNavigationKey: navigates backward through views and custom lists with Shift + Tab", () => {
+		const { handleNavigationKey } = require("../src/composables/useKeyboardShortcuts.ts");
+		const listStore = useListStore();
+		const filterStore = useFilterStore();
+		const uiStore = useUIStore();
+		const taskStore = useTaskStore();
+
+		listStore.lists = [
+			{
+				id: "inbox-id",
+				name: "Inbox",
+				color: "#3b82f6",
+				position: 0,
+				created_at: "",
+				updated_at: "",
+				deleted_at: null,
+			},
+			{
+				id: "work-id",
+				name: "Work",
+				color: "#10b981",
+				position: 1,
+				created_at: "",
+				updated_at: "",
+				deleted_at: null,
+			},
+			{
+				id: "personal-id",
+				name: "Personal",
+				color: "#6366f1",
+				position: 2,
+				created_at: "",
+				updated_at: "",
+				deleted_at: null,
+			},
+		];
+
+		function tabEvent(shift = false, ctrl = false, target: any = null) {
+			let prevented = false;
+			return {
+				key: "Tab",
+				shiftKey: shift,
+				ctrlKey: ctrl,
+				metaKey: false,
+				altKey: false,
+				target,
+				preventDefault: () => {
+					prevented = true;
+				},
+				get defaultPrevented() {
+					return prevented;
+				},
+			} as unknown as KeyboardEvent;
+		}
+
+		// When on inbox, Shift + Tab wraps around to the last custom list ('personal-id')
+		listStore.setActiveView("inbox");
+		const e1 = tabEvent(true);
+		const res1 = handleNavigationKey(e1, listStore, filterStore, uiStore, taskStore);
+		expect(res1).toBe(true);
+		expect(e1.defaultPrevented).toBe(true);
+		expect(listStore.activeView).toBe(null);
+		expect(listStore.activeListId).toBe("personal-id");
+
+		// Shift + Tab again -> 'work-id'
+		const e2 = tabEvent(true);
+		handleNavigationKey(e2, listStore, filterStore, uiStore, taskStore);
+		expect(listStore.activeView).toBe(null);
+		expect(listStore.activeListId).toBe("work-id");
+
+		// Shift + Tab again -> 'trash' (last smart view)
+		const e3 = tabEvent(true);
+		handleNavigationKey(e3, listStore, filterStore, uiStore, taskStore);
+		expect(listStore.activeView).toBe("trash");
+		expect(listStore.activeListId).toBe(null);
+	});
+
+	it("handleNavigationKey: does not intercept Tab when editing an input or inside an active modal", () => {
+		const { handleNavigationKey } = require("../src/composables/useKeyboardShortcuts.ts");
+		const listStore = useListStore();
+		const filterStore = useFilterStore();
+		const uiStore = useUIStore();
+		const taskStore = useTaskStore();
+
+		listStore.setActiveView("inbox");
+
+		function createTabEvent(target: any = null) {
+			let prevented = false;
+			return {
+				key: "Tab",
+				shiftKey: false,
+				ctrlKey: false,
+				metaKey: false,
+				altKey: false,
+				target,
+				preventDefault: () => {
+					prevented = true;
+				},
+				get defaultPrevented() {
+					return prevented;
+				},
+			} as unknown as KeyboardEvent;
+		}
+
+		// When typing in an input field, plain Tab is ignored (returns false, no preventDefault)
+		const inputEl = { tagName: "INPUT" };
+		const evInput = createTabEvent(inputEl);
+		const handledInput = handleNavigationKey(evInput, listStore, filterStore, uiStore, taskStore);
+		expect(handledInput).toBe(false);
+		expect(evInput.defaultPrevented).toBe(false);
+		expect(listStore.activeView).toBe("inbox");
+
+		// When inside a modal (e.g. CaptureModal or KeyboardShortcutsModal is open)
+		uiStore.toggleCapture(true);
+		const evModal = createTabEvent(null);
+		const handledModal = handleNavigationKey(evModal, listStore, filterStore, uiStore, taskStore);
+		expect(handledModal).toBe(false);
+		expect(evModal.defaultPrevented).toBe(false);
+		expect(listStore.activeView).toBe("inbox");
+	});
+
+	it("handleNavigationKey: clears tag filter and deselects active task upon navigation", () => {
+		const { handleNavigationKey } = require("../src/composables/useKeyboardShortcuts.ts");
+		const listStore = useListStore();
+		const filterStore = useFilterStore();
+		const uiStore = useUIStore();
+		const taskStore = useTaskStore();
+
+		filterStore.setTagFilter("urgent");
+		taskStore.setActiveTask("task-abc");
+		uiStore.toggleSidebar(true);
+
+		function createTabEvent() {
+			let prevented = false;
+			return {
+				key: "Tab",
+				shiftKey: false,
+				ctrlKey: false,
+				metaKey: false,
+				altKey: false,
+				target: null,
+				preventDefault: () => {
+					prevented = true;
+				},
+				get defaultPrevented() {
+					return prevented;
+				},
+			} as unknown as KeyboardEvent;
+		}
+
+		const ev = createTabEvent();
+		const handled = handleNavigationKey(ev, listStore, filterStore, uiStore, taskStore);
+		expect(handled).toBe(true);
+		expect(filterStore.selectedTag).toBe(null);
+		expect(taskStore.activeTaskId).toBe(null);
+		expect(uiStore.isSidebarOpen).toBe(false);
+		expect(listStore.activeView).toBe("inbox");
 	});
 });

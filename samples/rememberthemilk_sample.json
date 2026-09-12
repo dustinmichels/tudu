@@ -1,0 +1,828 @@
+{
+	"config": {
+		"username": "alex.taylor",
+		"first_name": "Alex",
+		"last_name": "Taylor",
+		"email": "alex.taylor@example.com",
+		"date_joined": 1600000000000,
+		"date_last_login": 1789066800000,
+		"date_last_forum_visit": 1650000000000,
+		"date_email_verified": 1600050000000,
+		"language": "en-US",
+		"date_pro_until": 1800000000000,
+		"pro_type": "auto::stripe",
+		"timezone_id": "America/New_York",
+		"date_format_month_first": false,
+		"time_format_24hr": false,
+		"country": "United States",
+		"remind_on": true,
+		"remind_time_on": true,
+		"start_of_day": "09:00:00",
+		"token_generation": "ANONYMIZED_MOCK_TOKEN_GENERATION==",
+		"show_legend": true,
+		"show_overview": false,
+		"news_clicked_date": 1663607465524,
+		"show_taskcloud": false,
+		"show_map_legend": true,
+		"map_due_date": true,
+		"show_tags_in_list": 1,
+		"use_smart_add": true,
+		"seen_v3_dialog": true,
+		"force_https": false,
+		"hide_timezone_warning": false,
+		"app_version": 4,
+		"last_year_dialog_seen": 0,
+		"email_confirmed": true,
+		"email_secret": "ANONYMIZED_MOCK_EMAIL_SECRET==",
+		"sync_all": true,
+		"inbox_email": "alex.taylor+inbox@example.com",
+		"import_email": "alex.taylor+import@example.com",
+		"digest": {
+			"overdue": true,
+			"start_today": true,
+			"start_tomorrow": true,
+			"start_week": false,
+			"due_today": true,
+			"due_tomorrow": true,
+			"due_week": false,
+			"recent_activity": false
+		},
+		"notifications": {
+			"contact_added": true,
+			"contact_joined": true,
+			"task_assigned": true,
+			"task_delegated": false,
+			"delegated_task_completed": false,
+			"delegated_task_postponed": false,
+			"delegated_task_changed": false,
+			"delegated_task_deleted": false,
+			"list_shared": true,
+			"shared_list_task_added": false,
+			"shared_list_task_completed": false,
+			"shared_list_task_postponed": false,
+			"shared_list_task_changed": false,
+			"shared_list_task_deleted": false
+		},
+		"date_moo_first_loaded": 1600000100000,
+		"date_moo_last_loaded": 1789066800000,
+		"nav_open": true,
+		"main_open": true,
+		"contacts_open": true,
+		"lists_open": true,
+		"smart_lists_open": true,
+		"locations_open": true,
+		"tags_open": true,
+		"contacts_sorting": 0,
+		"lists_sorting": 0,
+		"smart_lists_sorting": 0,
+		"locations_sorting": 0,
+		"tags_sorting": 0,
+		"contacts_display": 0,
+		"lists_display": 0,
+		"smart_lists_display": 0,
+		"locations_display": 0,
+		"tags_display": 0,
+		"last_view": "list/101/1001",
+		"info_card_expanded": true,
+		"theme": "forest",
+		"favorites_open": true,
+		"favorites_sorting": 1,
+		"favorites_display": 0,
+		"default_fields": [0, 3, 4, 7, 8, 9],
+		"default_sorting_scheme": "2",
+		"sorting_scheme_all": "121715",
+		"sorting_scheme_today": "121383",
+		"sorting_scheme_tomorrow": "3",
+		"sorting_scheme_week": "10",
+		"sorting_scheme_given": "3"
+	},
+	"lists": [
+		{
+			"id": "101",
+			"name": "Inbox",
+			"date_created": 1600000000000,
+			"date_modified": 1789066800000,
+			"syncable": false,
+			"token": "MOCK_LIST_TOKEN_INBOX==",
+			"sorting_scheme_id": "2"
+		},
+		{
+			"id": "102",
+			"name": "Sent",
+			"date_created": 1600000000000,
+			"date_modified": 1600000000000,
+			"syncable": false,
+			"token": "MOCK_LIST_TOKEN_SENT=="
+		},
+		{
+			"id": "103",
+			"name": "Work",
+			"date_created": 1610000000000,
+			"date_modified": 1789000000000,
+			"syncable": false,
+			"token": "MOCK_LIST_TOKEN_WORK==",
+			"sorting_scheme_id": "121715",
+			"relative_position": 2048
+		},
+		{
+			"id": "104",
+			"name": "Personal",
+			"date_created": 1610000000000,
+			"date_modified": 1789000000000,
+			"syncable": false,
+			"token": "MOCK_LIST_TOKEN_PERSONAL==",
+			"sorting_scheme_id": "121731",
+			"relative_position": 4096
+		},
+		{
+			"id": "105",
+			"name": "Projects",
+			"date_created": 1620000000000,
+			"date_modified": 1789000000000,
+			"syncable": false,
+			"token": "MOCK_LIST_TOKEN_PROJECTS==",
+			"sorting_scheme_id": "150409",
+			"relative_position": 6144
+		},
+		{
+			"id": "106",
+			"name": "Someday / Maybe",
+			"date_created": 1630000000000,
+			"date_modified": 1789000000000,
+			"syncable": false,
+			"token": "MOCK_LIST_TOKEN_SOMEDAY==",
+			"sorting_scheme_id": "2",
+			"relative_position": 8192
+		}
+	],
+	"smart_lists": [
+		{
+			"id": "201",
+			"name": "Recent",
+			"filter": "updatedWithin:\"4 day of  today\"",
+			"date_created": 1650000000000,
+			"date_modified": 1789000000000,
+			"sorting_scheme_id": "121715",
+			"relative_position": 1024
+		},
+		{
+			"id": "202",
+			"name": "Work Priorities",
+			"filter": "list:Work AND (priority:1 OR priority:2)",
+			"date_created": 1660000000000,
+			"date_modified": 1789000000000,
+			"sorting_scheme_id": "121731",
+			"relative_position": 2048
+		}
+	],
+	"tasks": [
+		{
+			"id": "1001",
+			"series_id": "2001",
+			"list_id": "104",
+			"name": "Review Q3 financial summary and tax documents",
+			"priority": "P1",
+			"date_created": 1788900000000,
+			"date_added": 1788900000000,
+			"date_modified": 1789066800000,
+			"date_due": 1789200000000,
+			"date_due_has_time": false,
+			"date_start_has_time": false,
+			"postponed": 1,
+			"source": "web",
+			"repeat_every": false,
+			"tags": ["finance"]
+		},
+		{
+			"id": "1002",
+			"series_id": "2002",
+			"list_id": "103",
+			"name": "Prepare slides for architectural review meeting",
+			"priority": "P1",
+			"date_created": 1788950000000,
+			"date_added": 1788950000000,
+			"date_modified": 1789066800000,
+			"date_due": 1789125600000,
+			"date_due_has_time": true,
+			"date_start_has_time": false,
+			"postponed": 0,
+			"source": "js",
+			"repeat_every": false,
+			"tags": ["development", "urgent"]
+		},
+		{
+			"id": "1003",
+			"series_id": "2003",
+			"list_id": "103",
+			"name": "Quarterly system backup and data integrity verification",
+			"priority": "P2",
+			"date_created": 1785000000000,
+			"date_added": 1785000000000,
+			"date_modified": 1789000000000,
+			"date_due": 1789459200000,
+			"date_due_has_time": false,
+			"date_start_has_time": false,
+			"postponed": 0,
+			"source": "js",
+			"repeat_every": true,
+			"tags": ["development"]
+		},
+		{
+			"id": "1004",
+			"series_id": "2004",
+			"list_id": "105",
+			"name": "Redesign user profile settings page",
+			"priority": "P2",
+			"date_created": 1787000000000,
+			"date_added": 1787000000000,
+			"date_modified": 1789000000000,
+			"date_due": 1789600000000,
+			"date_due_has_time": false,
+			"date_start_has_time": false,
+			"postponed": 0,
+			"source": "js",
+			"repeat_every": false,
+			"tags": ["design", "development"]
+		},
+		{
+			"id": "1005",
+			"series_id": "2005",
+			"list_id": "105",
+			"parent_id": "1004",
+			"name": "Draft wireframes and component hierarchy",
+			"priority": "P2",
+			"date_created": 1787100000000,
+			"date_added": 1787100000000,
+			"date_modified": 1788500000000,
+			"date_completed": 1788500000000,
+			"date_due_has_time": false,
+			"date_start_has_time": false,
+			"postponed": 0,
+			"source": "js",
+			"repeat_every": false,
+			"tags": ["design"]
+		},
+		{
+			"id": "1006",
+			"series_id": "2006",
+			"list_id": "105",
+			"parent_id": "1004",
+			"name": "Implement responsive layout in Vue components",
+			"priority": "P2",
+			"date_created": 1787200000000,
+			"date_added": 1787200000000,
+			"date_modified": 1789000000000,
+			"date_due": 1789500000000,
+			"date_due_has_time": false,
+			"date_start_has_time": false,
+			"postponed": 0,
+			"source": "js",
+			"repeat_every": false,
+			"tags": ["development"]
+		},
+		{
+			"id": "1007",
+			"series_id": "2007",
+			"list_id": "105",
+			"parent_id": "1004",
+			"name": "Write automated end-to-end integration tests",
+			"priority": "PN",
+			"date_created": 1787300000000,
+			"date_added": 1787300000000,
+			"date_modified": 1789000000000,
+			"date_due_has_time": false,
+			"date_start_has_time": false,
+			"postponed": 0,
+			"source": "js",
+			"repeat_every": false,
+			"tags": ["development"]
+		},
+		{
+			"id": "1008",
+			"series_id": "2008",
+			"list_id": "104",
+			"name": "Schedule annual physical and dental examination",
+			"priority": "P2",
+			"date_created": 1786000000000,
+			"date_added": 1786000000000,
+			"date_modified": 1788500000000,
+			"date_completed": 1788500000000,
+			"date_due": 1788400000000,
+			"date_due_has_time": false,
+			"date_start_has_time": false,
+			"postponed": 2,
+			"source": "iphone-native",
+			"repeat_every": false,
+			"tags": ["health"]
+		},
+		{
+			"id": "1009",
+			"series_id": "2009",
+			"list_id": "106",
+			"name": "Read research paper on distributed consensus algorithms",
+			"priority": "PN",
+			"date_created": 1780000000000,
+			"date_added": 1780000000000,
+			"date_modified": 1788000000000,
+			"date_due_has_time": false,
+			"date_start_has_time": false,
+			"postponed": 0,
+			"source": "js",
+			"repeat_every": false,
+			"url": "https://example.com/papers/consensus-algorithms.pdf",
+			"tags": ["reading", "development"]
+		},
+		{
+			"id": "1010",
+			"series_id": "2010",
+			"list_id": "104",
+			"name": "Order replacement HEPA air filters for HVAC unit",
+			"priority": "P3",
+			"date_created": 1788000000000,
+			"date_added": 1788000000000,
+			"date_modified": 1789000000000,
+			"date_due_has_time": false,
+			"date_start_has_time": false,
+			"postponed": 0,
+			"source": "android",
+			"repeat_every": false,
+			"tags": ["home", "errands"]
+		},
+		{
+			"id": "1011",
+			"series_id": "2011",
+			"list_id": "101",
+			"name": "Renew passport ahead of international summit",
+			"priority": "P1",
+			"date_created": 1788800000000,
+			"date_added": 1788800000000,
+			"date_modified": 1789066800000,
+			"date_due": 1792000000000,
+			"date_due_has_time": false,
+			"date_start_has_time": false,
+			"postponed": 0,
+			"source": "web",
+			"repeat_every": false,
+			"tags": []
+		},
+		{
+			"id": "1012",
+			"series_id": "2012",
+			"list_id": "104",
+			"name": "Daily morning mindfulness and meditation",
+			"priority": "PN",
+			"date_created": 1785000000000,
+			"date_added": 1785000000000,
+			"date_modified": 1789066800000,
+			"date_due": 1789128000000,
+			"date_due_has_time": true,
+			"date_start_has_time": false,
+			"postponed": 0,
+			"source": "android",
+			"repeat_every": true,
+			"tags": ["health"]
+		},
+		{
+			"id": "1013",
+			"series_id": "2013",
+			"list_id": "106",
+			"name": "Draft proposal for new open-source SQLite plugin",
+			"priority": "PN",
+			"date_created": 1782000000000,
+			"date_added": 1782000000000,
+			"date_modified": 1788000000000,
+			"date_due_has_time": false,
+			"date_start_has_time": false,
+			"postponed": 0,
+			"source": "js",
+			"repeat_every": false,
+			"tags": ["development"]
+		},
+		{
+			"id": "1014",
+			"series_id": "2014",
+			"list_id": "101",
+			"name": "Pick up dry cleaning before weekend trip",
+			"priority": "PN",
+			"date_created": 1788000000000,
+			"date_added": 1788000000000,
+			"date_modified": 1788900000000,
+			"date_completed": 1788900000000,
+			"date_due_has_time": false,
+			"date_start_has_time": false,
+			"postponed": 0,
+			"source": "iphone-native",
+			"repeat_every": false,
+			"tags": ["errands"]
+		},
+		{
+			"id": "1015",
+			"series_id": "2015",
+			"list_id": "103",
+			"name": "Team sprint planning and backlog estimation",
+			"priority": "P2",
+			"date_created": 1788500000000,
+			"date_added": 1788500000000,
+			"date_modified": 1789066800000,
+			"date_due": 1789140000000,
+			"date_due_has_time": true,
+			"date_start_has_time": false,
+			"postponed": 0,
+			"source": "web",
+			"repeat_every": false,
+			"tags": ["development"]
+		},
+		{
+			"id": "1016",
+			"series_id": "2016",
+			"list_id": "105",
+			"name": "Benchmark vector search performance in local SQLite",
+			"priority": "P3",
+			"date_created": 1788000000000,
+			"date_added": 1788000000000,
+			"date_modified": 1789000000000,
+			"date_due_has_time": false,
+			"date_start_has_time": false,
+			"postponed": 0,
+			"source": "js",
+			"repeat_every": false,
+			"url": "https://example.com/benchmarks/sqlite-vector",
+			"tags": ["development"]
+		},
+		{
+			"id": "1017",
+			"series_id": "2017",
+			"list_id": "104",
+			"name": "Plan weekend hiking route and check trail conditions",
+			"priority": "PN",
+			"date_created": 1788900000000,
+			"date_added": 1788900000000,
+			"date_modified": 1789066800000,
+			"date_due": 1789300000000,
+			"date_due_has_time": false,
+			"date_start_has_time": false,
+			"postponed": 0,
+			"source": "iphone-native",
+			"repeat_every": false,
+			"tags": ["health"]
+		},
+		{
+			"id": "1018",
+			"series_id": "2018",
+			"list_id": "101",
+			"name": "Reply to vendor inquiry regarding enterprise licensing",
+			"priority": "PN",
+			"date_created": 1789000000000,
+			"date_added": 1789000000000,
+			"date_modified": 1789066800000,
+			"date_due_has_time": false,
+			"date_start_has_time": false,
+			"postponed": 0,
+			"source": "web",
+			"repeat_every": false,
+			"tags": []
+		}
+	],
+	"tags": [
+		{
+			"id": "development",
+			"date_created": 1610000000000,
+			"date_modified": 1610000000000,
+			"relative_position": 1024,
+			"background_color": "#e0f2fe",
+			"foreground_color": "#0369a1"
+		},
+		{
+			"id": "design",
+			"date_created": 1610000000000,
+			"date_modified": 1610000000000,
+			"relative_position": 2048,
+			"background_color": "#fce7f3",
+			"foreground_color": "#be185d"
+		},
+		{
+			"id": "finance",
+			"date_created": 1610000000000,
+			"date_modified": 1610000000000,
+			"relative_position": 3072,
+			"background_color": "#dcfce7",
+			"foreground_color": "#15803d"
+		},
+		{
+			"id": "health",
+			"date_created": 1610000000000,
+			"date_modified": 1610000000000,
+			"relative_position": 4096,
+			"background_color": "#fee2e2",
+			"foreground_color": "#b91c1c"
+		},
+		{
+			"id": "errands",
+			"date_created": 1610000000000,
+			"date_modified": 1610000000000,
+			"relative_position": 5120
+		},
+		{
+			"id": "reading",
+			"date_created": 1610000000000,
+			"date_modified": 1610000000000,
+			"relative_position": 6144
+		},
+		{
+			"id": "home",
+			"date_created": 1610000000000,
+			"date_modified": 1610000000000,
+			"relative_position": 7168
+		},
+		{
+			"id": "urgent",
+			"date_created": 1610000000000,
+			"date_modified": 1610000000000,
+			"relative_position": 8192,
+			"background_color": "#ffedd5",
+			"foreground_color": "#c2410c"
+		}
+	],
+	"locations": [
+		{
+			"id": "301",
+			"date_created": 1610000000000,
+			"date_modified": 1789000000000,
+			"relative_position": 1024,
+			"name": "Home",
+			"latitude": 40.712776,
+			"longitude": -74.005974,
+			"address": "New York, NY, USA",
+			"zoom": 17,
+			"owner_id": "10001"
+		},
+		{
+			"id": "302",
+			"date_created": 1610000000000,
+			"date_modified": 1789000000000,
+			"relative_position": 2048,
+			"name": "Office",
+			"latitude": 40.758896,
+			"longitude": -73.98513,
+			"address": "Midtown Manhattan, New York, NY, USA",
+			"zoom": 17,
+			"owner_id": "10001"
+		}
+	],
+	"contacts": [
+		{
+			"id": "10001",
+			"email": "alex.taylor@example.com",
+			"first_name": "Alex",
+			"last_name": "Taylor",
+			"username": "alex.taylor",
+			"avatar": "gravatar",
+			"is_direct": true,
+			"is_pending": false
+		}
+	],
+	"notes": [
+		{
+			"id": "601",
+			"series_id": "2002",
+			"date_created": 1788950000000,
+			"date_modified": 1789066800000,
+			"title": "Meeting Agenda & Outline",
+			"content": "1. Review current architecture bottlenecks\n2. Present proposed local-first sync model\n3. Discuss database migration strategy\n4. Q&A and action item allocation",
+			"creator_id": "10001",
+			"last_editor_id": "10001"
+		},
+		{
+			"id": "602",
+			"series_id": "2004",
+			"date_created": 1787000000000,
+			"date_modified": 1787000000000,
+			"title": "Design System References",
+			"content": "Refer to Figma design tokens and component specs:\nhttps://example.com/design-system/profile\nEnsure high-contrast mode compliance (WCAG AAA).",
+			"creator_id": "10001",
+			"last_editor_id": "10001"
+		},
+		{
+			"id": "603",
+			"series_id": "2015",
+			"date_created": 1788500000000,
+			"date_modified": 1788500000000,
+			"title": "Discussion Points",
+			"content": "- Velocity from previous sprint: 42 story points\n- Tech debt items prioritized for next cycle: schema migration runner, offline queue testing",
+			"creator_id": "10001",
+			"last_editor_id": "10001"
+		}
+	],
+	"external_auths": [],
+	"list_permissions": [
+		{
+			"list_id": "101",
+			"contact_id": "10001",
+			"access_type": "owner"
+		},
+		{
+			"list_id": "102",
+			"contact_id": "10001",
+			"access_type": "owner"
+		},
+		{
+			"list_id": "103",
+			"contact_id": "10001",
+			"access_type": "owner"
+		},
+		{
+			"list_id": "104",
+			"contact_id": "10001",
+			"access_type": "owner"
+		},
+		{
+			"list_id": "105",
+			"contact_id": "10001",
+			"access_type": "owner"
+		},
+		{
+			"list_id": "106",
+			"contact_id": "10001",
+			"access_type": "owner"
+		}
+	],
+	"apps": [],
+	"sorting_schemes": [
+		{
+			"id": "150409",
+			"properties": [
+				{
+					"field": "date_updated",
+					"ascending": false
+				}
+			],
+			"group_by": "priority",
+			"read_only": false,
+			"date_created": 1672930064921,
+			"date_last_modified": 1672930205411
+		},
+		{
+			"id": "121731",
+			"properties": [
+				{
+					"field": "priority",
+					"ascending": true
+				}
+			],
+			"group_by": "list",
+			"read_only": false,
+			"date_created": 1505593063157,
+			"date_last_modified": 1505593063157
+		},
+		{
+			"id": "121715",
+			"properties": [
+				{
+					"field": "priority",
+					"ascending": true
+				},
+				{
+					"field": "date_due",
+					"ascending": true
+				}
+			],
+			"group_by": "list",
+			"read_only": false,
+			"date_created": 1505490968496,
+			"date_last_modified": 1505490997818
+		},
+		{
+			"id": "121383",
+			"properties": [
+				{
+					"field": "priority",
+					"ascending": true
+				},
+				{
+					"field": "date_due",
+					"ascending": true
+				},
+				{
+					"field": "list",
+					"ascending": true
+				}
+			],
+			"group_by": "tags",
+			"read_only": false,
+			"date_created": 1504105122835,
+			"date_last_modified": 1504798740951
+		}
+	],
+	"drag_drop": [
+		{
+			"ctx_type": "today",
+			"ctx_id": "today",
+			"task_id": "1002",
+			"relative_position": 1024
+		},
+		{
+			"ctx_type": "today",
+			"ctx_id": "today",
+			"task_id": "1015",
+			"relative_position": 2048
+		},
+		{
+			"ctx_type": "list",
+			"ctx_id": "103",
+			"task_id": "1002",
+			"relative_position": 1024
+		},
+		{
+			"ctx_type": "list",
+			"ctx_id": "103",
+			"task_id": "1015",
+			"relative_position": 2048
+		},
+		{
+			"ctx_type": "list",
+			"ctx_id": "103",
+			"task_id": "1003",
+			"relative_position": 3072
+		}
+	],
+	"notification_sinks": [
+		{
+			"id": "401",
+			"name": "Mobile App",
+			"im_type": "iphone",
+			"address": "MOCK_APNS_TOKEN|Device:00000000-0000-0000-0000-000000000000",
+			"verified": true,
+			"reminders_active": true,
+			"digest_active": false,
+			"notifications_active": false,
+			"date_modified": 1755041640843
+		},
+		{
+			"id": "402",
+			"im_type": "email",
+			"address": "alex.taylor@example.com",
+			"verified": true,
+			"reminders_active": false,
+			"digest_active": false,
+			"notifications_active": false,
+			"date_modified": 1600000000000
+		},
+		{
+			"id": "403",
+			"im_type": "html5notif",
+			"address": "desktop",
+			"verified": true,
+			"reminders_active": true,
+			"digest_active": false,
+			"notifications_active": true,
+			"date_modified": 1600000000000
+		}
+	],
+	"requests": [],
+	"activities": [],
+	"reminders": [
+		{
+			"id": "701",
+			"series_id": "2002",
+			"notification_sink_id": "403",
+			"reminder_type": "atDueTime",
+			"date_modified": 1788950000000
+		},
+		{
+			"id": "702",
+			"series_id": "2001",
+			"notification_sink_id": "401",
+			"reminder_type": "beforeDueDate",
+			"reminder_params": "P1D",
+			"date_modified": 1788900000000
+		},
+		{
+			"id": "703",
+			"series_id": "2012",
+			"notification_sink_id": "401",
+			"reminder_type": "atDueTime",
+			"date_modified": 1785000000000
+		}
+	],
+	"file_services": [],
+	"attachments": [],
+	"favorites": [
+		{
+			"id": "501",
+			"favorite_ctx_type": "list",
+			"favorite_ctx_id": "103",
+			"date_created": 1660000000000,
+			"date_modified": 1660000000000,
+			"relative_position": 10240
+		},
+		{
+			"id": "502",
+			"favorite_ctx_type": "list",
+			"favorite_ctx_id": "201",
+			"date_created": 1660000000000,
+			"date_modified": 1660000000000,
+			"relative_position": 20480
+		}
+	],
+	"scripts": []
+}
