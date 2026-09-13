@@ -34,8 +34,8 @@ export default defineConfig(() => ({
 	build: {
 		rollupOptions: {
 			input: {
-				desktop: resolve(__dirname, "index.html"),
-				mobile: resolve(__dirname, "mobile.html"),
+				desktop: resolve(import.meta.dirname, "index.html"),
+				mobile: resolve(import.meta.dirname, "mobile.html"),
 			},
 		},
 	},
