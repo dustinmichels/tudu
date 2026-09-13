@@ -7,6 +7,7 @@ import {
 	CloudAlert,
 	CloudOff,
 	Command as CommandIcon,
+	FileDown,
 	FileUp,
 	Keyboard as KeyboardIcon,
 	List,
@@ -15,7 +16,8 @@ import {
 	StickyNote,
 	X,
 } from "lucide-vue-next";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
+import { api } from "../services/api.ts";
 import { useFilterStore } from "../stores/filters.ts";
 import { useTaskStore } from "../stores/tasks.ts";
 import { useUIStore } from "../stores/ui.ts";
@@ -42,6 +44,26 @@ function handleOpenImport() {
 	isMenuOpen.value = false;
 	uiStore.toggleImport(true);
 }
+async function handleExportBackup() {
+	isMenuOpen.value = false;
+	try {
+		const doc = await api.backup.export();
+		const jsonStr = JSON.stringify(doc, null, 2);
+		const blob = new Blob([jsonStr], { type: "application/json" });
+		const url = URL.createObjectURL(blob);
+		const dateStr = new Date().toISOString().slice(0, 10);
+		const a = document.createElement("a");
+		a.href = url;
+		a.download = `tudu-backup-${dateStr}.json`;
+		document.body.appendChild(a);
+		a.click();
+		document.body.removeChild(a);
+		URL.revokeObjectURL(url);
+	} catch (err) {
+		console.error("Failed to export backup:", err);
+	}
+}
+
 function handleOpenCommandPalette() {
 	isMenuOpen.value = false;
 	uiStore.openCommandPalette("commands");
@@ -63,6 +85,10 @@ onMounted(() => {
 		typeof navigator !== "undefined" &&
 		/Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 	window.addEventListener("click", handleDocumentClick);
+});
+
+onUnmounted(() => {
+	window.removeEventListener("click", handleDocumentClick);
 });
 function handleClearSearch() {
 	filterStore.setSearchQuery("");
@@ -140,6 +166,7 @@ const syncTooltip = computed(() => {
 					@click="handleClearSearch"
 					class="absolute inset-y-0 right-0 pr-2 flex items-center text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 cursor-pointer"
 					title="Clear search"
+					aria-label="Clear search"
 				>
 					<X class="w-4 h-4" />
 				</button>
@@ -168,6 +195,7 @@ const syncTooltip = computed(() => {
 					]"
 					class="flex cursor-pointer items-center gap-1 rounded-md px-2 py-0.5 transition-all"
 					:title="`${mode.label} view (${mode.shortcut})`"
+					:aria-label="`${mode.label} view (${mode.shortcut})`"
 				>
 					<component
 						:is="mode.icon"
@@ -186,6 +214,7 @@ const syncTooltip = computed(() => {
 				type="button"
 				@click="handleToggleCompleted"
 				:title="taskStore.includeCompleted ? 'Hide completed tasks' : 'Show completed tasks'"
+				:aria-label="taskStore.includeCompleted ? 'Hide completed tasks' : 'Show completed tasks'"
 				class="flex items-center gap-1.5 px-2 py-1 text-xs rounded-md font-medium border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer"
 				data-toggle-completed-button
 			>
@@ -202,6 +231,7 @@ const syncTooltip = computed(() => {
 					type="button"
 					@click="toggleMenu"
 					title="Menu"
+					aria-label="Menu"
 					class="flex items-center gap-1 px-2 py-1 text-xs rounded-md font-medium border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer"
 					data-menu-button
 				>
@@ -234,6 +264,15 @@ const syncTooltip = computed(() => {
 					>
 						<FileUp class="w-4 h-4 text-emerald-500" />
 						<span>Import...</span>
+					</button>
+					<button
+						type="button"
+						@click="handleExportBackup"
+						class="w-full px-3 py-2 text-left flex items-center gap-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+						data-menu-export-button
+					>
+						<FileDown class="w-4 h-4 text-emerald-500" />
+						<span>Export Backup...</span>
 					</button>
 					<button
 						type="button"

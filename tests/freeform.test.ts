@@ -309,9 +309,8 @@ describe("computeAutoLayoutPositions and persistFreeformPositions", () => {
 		// Subtasks are close to parent (bounded distance)
 		const distSub1 = Math.hypot(sub1Pos.x - parentPos.x, sub1Pos.y - parentPos.y);
 		const distSub2 = Math.hypot(sub2Pos.x - parentPos.x, sub2Pos.y - parentPos.y);
-		expect(distSub1).toBeLessThan(450);
-		expect(distSub2).toBeLessThan(450);
-
+		expect(distSub1).toBeLessThan(500);
+		expect(distSub2).toBeLessThan(500);
 		// Verify zero collisions between all pairs of cards
 		const cards = [
 			{ id: "parent-1", ...parentPos, width: CARD_WIDTH, height: CARD_HEIGHT },

@@ -13,7 +13,7 @@ import {
 } from "lucide-vue-next";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { PRIORITY, type Priority, type Task } from "../../models/index.ts";
-import { assignTag, removeTag } from "../../services/api.ts";
+import { batchAssignTag, batchRemoveTag } from "../../services/api.ts";
 import { useListStore } from "../../stores/lists.ts";
 import { useTagStore } from "../../stores/tags.ts";
 import { useTaskStore } from "../../stores/tasks.ts";
@@ -191,7 +191,7 @@ async function handleBatchAssignTag(tagName: string) {
 	try {
 		const existingTag = tagStore.tags.find((t) => t.name.toLowerCase() === trimmed.toLowerCase());
 		const tag = existingTag ?? (await tagStore.createTag(trimmed));
-		await Promise.all(ids.map((id) => assignTag(id, tag.id)));
+		await batchAssignTag(ids, tag.id);
 		await tagStore.fetchTags();
 		await taskStore.fetchAllTasks();
 		customNewTagName.value = "";
@@ -208,7 +208,7 @@ async function handleBatchRemoveTag(tagName: string) {
 	if (!ids.length || !tagName.trim()) return;
 	isBatchOperating.value = true;
 	try {
-		await Promise.all(ids.map((id) => removeTag(id, tagName.trim())));
+		await batchRemoveTag(ids, tagName.trim());
 		await tagStore.fetchTags();
 		await taskStore.fetchAllTasks();
 	} catch (err) {
@@ -229,9 +229,7 @@ async function handleBatchDelete() {
 
 	isBatchOperating.value = true;
 	try {
-		for (const id of ids) {
-			await taskStore.deleteTask(id);
-		}
+		await taskStore.batchDelete(ids);
 		emit("update:selectedTaskIds", new Set());
 	} catch (err) {
 		console.error("Failed to delete selected tasks:", err);

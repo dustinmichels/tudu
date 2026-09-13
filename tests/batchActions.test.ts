@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import { createPinia, setActivePinia } from "pinia";
 import type { Task } from "../src/models/index.ts";
+import { batchAssignTag, batchRemoveTag } from "../src/services/api.ts";
 import { useTaskStore } from "../src/stores/tasks.ts";
 
 // Mock Tauri invoke
@@ -52,6 +53,13 @@ mock.module("@tauri-apps/api/core", () => ({
 			return updated;
 		}
 
+		if (command === "batch_delete_tasks") {
+			const { ids } = (args as { ids: string[] }) || {};
+			const idSet = new Set(ids || []);
+			mockTasks = mockTasks.filter((t) => !idSet.has(t.id));
+			return null;
+		}
+
 		if (command === "get_task_detail") {
 			const { id } = (args as { id: string }) || {};
 			const task = mockTasks.find((t) => t.id === id);
@@ -64,7 +72,12 @@ mock.module("@tauri-apps/api/core", () => ({
 			};
 		}
 
-		if (command === "assign_tag" || command === "remove_tag") {
+		if (
+			command === "assign_tag" ||
+			command === "remove_tag" ||
+			command === "batch_assign_tag" ||
+			command === "batch_remove_tag"
+		) {
 			return null;
 		}
 
@@ -174,6 +187,22 @@ describe("Batch Actions & Task Row Item", () => {
 		expect(batchCall).toBeDefined();
 	});
 
+	test("taskStore.batchDelete invokes batch_delete_tasks and updates state", async () => {
+		const taskStore = useTaskStore();
+		taskStore.tasks = [...mockTasks];
+		taskStore.allTasks = [...mockTasks];
+
+		await taskStore.batchDelete(["t1", "t2"]);
+
+		expect(taskStore.tasks.find((t) => t.id === "t1")).toBeUndefined();
+		expect(taskStore.tasks.find((t) => t.id === "t2")).toBeUndefined();
+		expect(taskStore.allTasks.find((t) => t.id === "t1")?.deleted_at).toBeTruthy();
+		expect(taskStore.allTasks.find((t) => t.id === "t2")?.deleted_at).toBeTruthy();
+
+		const batchCall = mockInvokes.find((i) => i.command === "batch_delete_tasks");
+		expect(batchCall).toBeDefined();
+	});
+
 	test("taskStore computes subtask counts from allTasks", () => {
 		const taskStore = useTaskStore();
 		taskStore.allTasks = [...mockTasks];
@@ -205,5 +234,17 @@ describe("Batch Actions & Task Row Item", () => {
 			return false;
 		});
 		expect(getTasksCall).toBeDefined();
+	});
+
+	test("batchAssignTag and batchRemoveTag invoke tauri commands with taskIds and tagId", async () => {
+		await batchAssignTag(["t1", "t2"], "tag-1");
+		const assignCall = mockInvokes.find((i) => i.command === "batch_assign_tag");
+		expect(assignCall).toBeDefined();
+		expect(assignCall?.args).toEqual({ taskIds: ["t1", "t2"], tagId: "tag-1" });
+
+		await batchRemoveTag(["t1", "t2"], "tag-1");
+		const removeCall = mockInvokes.find((i) => i.command === "batch_remove_tag");
+		expect(removeCall).toBeDefined();
+		expect(removeCall?.args).toEqual({ taskIds: ["t1", "t2"], tagId: "tag-1" });
 	});
 });

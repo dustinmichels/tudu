@@ -7,6 +7,7 @@ import {
 	getLists as apiGetLists,
 	updateList as apiUpdateList,
 } from "../services/api.ts";
+import { useTaskStore } from "./tasks.ts";
 
 export type DefaultView =
 	| "inbox"
@@ -142,6 +143,14 @@ export const useListStore = defineStore("lists", () => {
 			lists.value = lists.value.filter((l) => l.id !== id);
 			if (activeListId.value === id) {
 				activeListId.value = inboxList.value?.id ?? lists.value[0]?.id ?? null;
+			}
+			try {
+				const taskStore = useTaskStore();
+				taskStore.allTasks = taskStore.allTasks.filter((t) => t.list_id !== id);
+				taskStore.tasks = taskStore.tasks.filter((t) => t.list_id !== id);
+				await taskStore.fetchAllTasks();
+			} catch {
+				// Handle test or non-store environments gracefully
 			}
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);

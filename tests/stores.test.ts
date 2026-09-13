@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { createPinia, setActivePinia } from "pinia";
 import type { List, Task } from "../src/models/index.ts";
 
@@ -103,6 +103,7 @@ describe("API Service", () => {
 
 	test("throws ApiError on invoke failure", async () => {
 		mockErrors.get_lists = "Database locked";
+		const consoleSpy = spyOn(console, "error").mockImplementation(() => {});
 
 		try {
 			await api.lists.getAll();
@@ -113,6 +114,8 @@ describe("API Service", () => {
 				expect(err.command).toBe("get_lists");
 				expect(err.message).toBe("Database locked");
 			}
+		} finally {
+			consoleSpy.mockRestore();
 		}
 	});
 
@@ -692,20 +695,18 @@ describe("Pinia Task Store (useTaskStore)", () => {
 		taskStore.allTasks = [taskInWork, taskInInbox];
 		taskStore.tasks = [taskInWork];
 
-		expect(taskStore.allTasksList.length).toBe(2);
-		expect(taskStore.todayTasks.length).toBe(2);
+		expect(taskStore.allTasks.length).toBe(2);
 
 		// Mock backend delete_list and subsequent get_tasks returning only remaining active tasks
 		mockResponses.delete_list = null;
 		mockResponses.get_tasks = [taskInInbox];
 
+		// listStore.deleteList now automatically synchronizes taskStore
 		await listStore.deleteList("work-list");
-		await taskStore.fetchAllTasks();
 
 		expect(taskStore.allTasks.length).toBe(1);
 		expect(taskStore.allTasks[0]?.id).toBe("ti1");
-		expect(taskStore.allTasksList.some((t) => t.id === "tw1")).toBe(false);
-		expect(taskStore.todayTasks.some((t) => t.id === "tw1")).toBe(false);
+		expect(taskStore.allTasks.some((t) => t.id === "tw1")).toBe(false);
 	});
 });
 
@@ -717,7 +718,7 @@ describe("Pinia Tag Store (useTagStore)", () => {
 		invokeCalls = [];
 	});
 
-	test("fetchTags and loadTags retrieve tags with counts from get_tags_with_counts", async () => {
+	test("fetchTags retrieves tags with counts from get_tags_with_counts", async () => {
 		const tagStore = useTagStore();
 		mockResponses.get_tags_with_counts = [
 			{
@@ -740,7 +741,7 @@ describe("Pinia Tag Store (useTagStore)", () => {
 			},
 		];
 
-		const result = await tagStore.loadTags();
+		const result = await tagStore.fetchTags();
 		expect(result.length).toBe(2);
 		expect(invokeCalls[0]?.command).toBe("get_tags_with_counts");
 
@@ -854,6 +855,67 @@ describe("Pinia Filter Store (useFilterStore)", () => {
 			completedToEnd: true,
 		});
 	});
+
+	test("filteredTasks respects filterStore sorting when search is active", () => {
+		const filterStore = useFilterStore();
+		const taskStore = useTaskStore();
+		taskStore.allTasks = [
+			{
+				id: "t1",
+				title: "Alpha task",
+				priority: 3,
+				due: "2026-09-20",
+				completed: false,
+				list_id: "list-1",
+				created_at: "2026-09-01T00:00:00Z",
+				updated_at: "2026-09-01T00:00:00Z",
+				deleted_at: null,
+				description: null,
+				is_all_day: false,
+				rrule: null,
+				location: null,
+				url: null,
+				completed_at: null,
+				parent_id: null,
+				uid: null,
+			},
+			{
+				id: "t2",
+				title: "Beta task",
+				priority: 1,
+				due: "2026-09-10",
+				completed: false,
+				list_id: "list-1",
+				created_at: "2026-09-02T00:00:00Z",
+				updated_at: "2026-09-02T00:00:00Z",
+				deleted_at: null,
+				description: null,
+				is_all_day: false,
+				rrule: null,
+				location: null,
+				url: null,
+				completed_at: null,
+				parent_id: null,
+				uid: null,
+			},
+		];
+
+		filterStore.setSearchQuery("task");
+		// Default sorting is priority asc (t2: 1, t1: 3)
+		expect(taskStore.filteredTasks.map((t) => t.id)).toEqual(["t2", "t1"]);
+
+		// Update sorting to priority desc via filterStore.setSorting
+		filterStore.setSorting("priority", "desc");
+		expect(taskStore.filteredTasks.map((t) => t.id)).toEqual(["t1", "t2"]);
+
+		// Update sorting to due date asc (t2: 09-10, t1: 09-20)
+		filterStore.setSorting("due", "asc");
+		expect(taskStore.filteredTasks.map((t) => t.id)).toEqual(["t2", "t1"]);
+
+		// Update sorting to due date desc (t1: 09-20, t2: 09-10)
+		filterStore.setSorting("due", "desc");
+		expect(taskStore.filteredTasks.map((t) => t.id)).toEqual(["t1", "t2"]);
+	});
 });
 
 describe("Task Store Smart Lists and Reactive Integration", () => {
@@ -861,7 +923,7 @@ describe("Task Store Smart Lists and Reactive Integration", () => {
 		setActivePinia(createPinia());
 	});
 
-	test("taskStore exposes reactive smart lists and counts", () => {
+	test("taskStore exposes reactive counts", () => {
 		const listStore = useListStore();
 		listStore.lists = [
 			{
@@ -906,13 +968,6 @@ describe("Task Store Smart Lists and Reactive Integration", () => {
 			}),
 			makeTask({ id: "t-deleted", deleted_at: "2026-01-01T00:00:00Z" }),
 		];
-
-		expect(taskStore.inboxTasks.length).toBe(2);
-		expect(taskStore.todayTasks.length).toBe(2);
-		expect(taskStore.tomorrowTasks.length).toBe(1);
-		expect(taskStore.overdueTasks.length).toBe(1);
-		expect(taskStore.allTasksList.length).toBe(4);
-		expect(taskStore.trashTasks.length).toBe(1);
 
 		expect(taskStore.countInbox).toBe(2);
 		expect(taskStore.countToday).toBe(2);

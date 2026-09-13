@@ -99,7 +99,7 @@ pub async fn get_tasks_impl(
         match v.trim().to_lowercase().as_str() {
             "today" => {
                 if include_completed {
-                    conditions.push("(t.due IS NOT NULL AND ((t.completed = 0 AND date(t.due) <= date('now', 'localtime')) OR (t.completed = 1 AND date(t.due) = date('now', 'localtime'))))".to_string());
+                    conditions.push("(t.due IS NOT NULL AND ((t.completed = 0 AND date(t.due) <= date('now', 'localtime')) OR (t.completed = 1 AND (date(t.due) = date('now', 'localtime') OR (date(t.due) <= date('now', 'localtime') AND date(t.completed_at, 'localtime') = date('now', 'localtime'))))))".to_string());
                 } else {
                     conditions.push("(t.completed = 0 AND t.due IS NOT NULL AND date(t.due) <= date('now', 'localtime'))".to_string());
                 }
@@ -644,6 +644,46 @@ pub async fn delete_task_impl(conn: &Connection, id: String) -> Result<(), Strin
 pub async fn delete_task(state: State<'_, DbState>, id: String) -> Result<(), String> {
     delete_task_impl(&state.conn, id).await
 }
+pub async fn batch_delete_tasks_impl(conn: &Connection, ids: Vec<String>) -> Result<(), String> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let now = now_iso();
+    for chunk in ids.chunks(500) {
+        let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "WITH RECURSIVE descendants AS (
+                SELECT id FROM tasks WHERE id IN ({})
+                UNION ALL
+                SELECT t.id FROM tasks t INNER JOIN descendants d ON t.parent_id = d.id
+            )
+            UPDATE tasks
+            SET deleted_at = ?, updated_at = ?
+            WHERE id IN (SELECT id FROM descendants) AND deleted_at IS NULL",
+            placeholders
+        );
+        let mut params: Vec<libsql::Value> = chunk
+            .iter()
+            .map(|id| libsql::Value::Text(id.clone()))
+            .collect();
+        params.push(libsql::Value::Text(now.clone()));
+        params.push(libsql::Value::Text(now.clone()));
+
+        conn.execute(&sql, params)
+            .await
+            .map_err(|e| format!("Failed to recursively soft-delete tasks in batch: {}", e))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn batch_delete_tasks(
+    state: State<'_, DbState>,
+    ids: Vec<String>,
+) -> Result<(), String> {
+    batch_delete_tasks_impl(&state.conn, ids).await
+}
+
 
 pub async fn toggle_task_complete_impl(
     conn: &Connection,
@@ -1029,6 +1069,91 @@ mod tests {
             let _ = std::fs::remove_dir_all(temp_dir);
         });
     }
+    #[test]
+    fn test_batch_delete_tasks() {
+        tauri::async_runtime::block_on(async {
+            let temp_dir = std::env::temp_dir().join(format!("tudu_test_batch_del_{}", Uuid::new_v4()));
+            let db_path = temp_dir.join("tudu.db");
+            let state = init_db(&db_path).await.expect("init_db failed");
+            let conn = &state.conn;
+
+            let list = create_list_impl(
+                conn,
+                "Batch Del List".to_string(),
+                None,
+                None,
+            )
+            .await
+            .expect("create list");
+
+            let t1 = create_task_impl(
+                conn,
+                list.id.clone(),
+                "Task 1".to_string(),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("create t1");
+
+            let t2 = create_task_impl(
+                conn,
+                list.id.clone(),
+                "Task 2".to_string(),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("create t2");
+
+            let t1_sub = create_task_impl(
+                conn,
+                list.id.clone(),
+                "Subtask of 1".to_string(),
+                None,
+                None,
+                Some(t1.id.clone()),
+            )
+            .await
+            .expect("create t1_sub");
+
+            // Batch delete [t1.id, t2.id]
+            batch_delete_tasks_impl(conn, vec![t1.id.clone(), t2.id.clone()])
+                .await
+                .expect("batch delete");
+
+            let tasks_after = get_tasks_impl(
+                conn,
+                Some(list.id.clone()),
+                Some(true),
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("get tasks");
+
+            assert_eq!(tasks_after.len(), 0);
+
+            let mut rows = conn
+                .query(
+                    "SELECT deleted_at FROM tasks WHERE id = ?1",
+                    params![t1_sub.id],
+                )
+                .await
+                .unwrap();
+            let row = rows.next().await.unwrap().unwrap();
+            let sub_deleted: Option<String> = row.get(0).unwrap();
+            assert!(sub_deleted.is_some());
+
+            let _ = std::fs::remove_dir_all(temp_dir);
+        });
+    }
+
 
     #[test]
     fn test_e2e_persistence_restart_smoke() {
@@ -1448,6 +1573,28 @@ mod tests {
                 .await
                 .unwrap();
 
+            let t_overdue_comp_past = create_task_impl(
+                &conn,
+                inbox_id.clone(),
+                "Overdue completed past".to_string(),
+                Some(
+                    chrono::Local::now()
+                        .checked_sub_signed(chrono::Duration::days(5))
+                        .unwrap()
+                        .format("%Y-%m-%d")
+                        .to_string(),
+                ),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+            conn.execute(
+                "UPDATE tasks SET completed = 1, completed_at = datetime('now', 'localtime', '-3 days') WHERE id = ?1",
+                params![t_overdue_comp_past.id],
+            )
+            .await
+            .unwrap();
             // 1. Today view with include_completed = true
             let today_with_comp = get_tasks_impl(
                 &conn,
@@ -1465,11 +1612,12 @@ mod tests {
             assert!(today_titles.contains(&"Overdue incomplete".to_string()));
             assert!(today_titles.contains(&"Today incomplete".to_string()));
             assert!(today_titles.contains(&"Today completed".to_string()));
-            // Crucial: completed task with past due date must NOT be in Today
-            assert!(!today_titles.contains(&"Overdue completed".to_string()));
+            // Completed overdue task completed today MUST be in Today
+            assert!(today_titles.contains(&"Overdue completed".to_string()));
+            // Old completed task completed in the past must NOT be in Today
+            assert!(!today_titles.contains(&"Overdue completed past".to_string()));
             assert!(!today_titles.contains(&"Week completed".to_string()));
             assert!(!today_titles.contains(&"Week incomplete".to_string()));
-
             // 2. Today view with include_completed = false
             let today_no_comp = get_tasks_impl(
                 &conn,

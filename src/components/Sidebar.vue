@@ -216,7 +216,6 @@ async function handleDeleteList(event: MouseEvent, id: string) {
 
 	try {
 		await listStore.deleteList(id);
-		await taskStore.fetchAllTasks();
 	} catch (err) {
 		console.error("Failed to delete list:", err);
 	}
@@ -242,6 +241,7 @@ async function handleDeleteList(event: MouseEvent, id: string) {
 				@click="uiStore.toggleSidebar(false)"
 				class="md:hidden p-1 rounded-md text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-800 cursor-pointer"
 				title="Close sidebar"
+				aria-label="Close sidebar"
 			>
 				<X class="w-4 h-4" />
 			</button>
@@ -342,6 +342,7 @@ async function handleDeleteList(event: MouseEvent, id: string) {
 								@click="openListIconPicker($event, list)"
 								class="p-0.5 -ml-0.5 rounded-md hover:bg-zinc-200/80 dark:hover:bg-zinc-800 transition-colors shrink-0 cursor-pointer"
 								title="Change icon"
+								aria-label="Change icon"
 							>
 								<component
 									:is="getListIcon(list.icon)"
@@ -406,6 +407,7 @@ async function handleDeleteList(event: MouseEvent, id: string) {
 								@click="startRenameList($event, list)"
 								class="opacity-0 group-hover:opacity-100 p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-opacity cursor-pointer"
 								title="Rename list"
+								aria-label="Rename list"
 							>
 								<Edit2 class="w-3 h-3" />
 							</button>
@@ -415,6 +417,7 @@ async function handleDeleteList(event: MouseEvent, id: string) {
 								@click="handleDeleteList($event, list.id)"
 								class="opacity-0 group-hover:opacity-100 p-1 text-zinc-400 hover:text-rose-500 transition-opacity cursor-pointer"
 								title="Delete list"
+								aria-label="Delete list"
 							>
 								<Trash2 class="w-3 h-3" />
 							</button>
@@ -429,11 +432,9 @@ async function handleDeleteList(event: MouseEvent, id: string) {
 								@click="openNewListIconPicker($event)"
 								class="absolute left-1.5 p-1 rounded-md hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors cursor-pointer"
 								title="Choose icon"
+								aria-label="Choose icon"
 							>
-								<component
-									:is="getListIcon(newListIcon)"
-									class="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400"
-								/>
+								<component :is="getListIcon(newListIcon)" />
 							</button>
 							<input
 								v-model="newListName"
@@ -447,6 +448,7 @@ async function handleDeleteList(event: MouseEvent, id: string) {
 								:disabled="isCreating || !newListName.trim()"
 								class="absolute right-1.5 p-0.5 text-zinc-400 hover:text-emerald-600 disabled:opacity-30 cursor-pointer"
 								title="Add list"
+								aria-label="Add list"
 							>
 								<Plus class="w-3.5 h-3.5" />
 							</button>

@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import type { CreateTaskInput, Priority, Task, UpdateTaskInput } from "../models/index.ts";
 import {
+	batchDeleteTasks as apiBatchDeleteTasks,
 	batchUpdateTasks as apiBatchUpdateTasks,
 	createTask as apiCreateTask,
 	deleteTask as apiDeleteTask,
@@ -19,7 +20,6 @@ import {
 	isTomorrow,
 	parseDueDateToLocal,
 	type QueryCriteria,
-	querySmartList,
 	queryTasks,
 	type SmartView,
 } from "../services/queryEngine.ts";
@@ -97,25 +97,6 @@ export const useTaskStore = defineStore("tasks", () => {
 	const countAll = computed(() => smartCounts.value.all.incomplete);
 	const countTrash = computed(() => smartCounts.value.trash.total);
 	const countOverdue = computed(() => smartCounts.value.overdue.incomplete);
-
-	const inboxTasks = computed<Task[]>(() => {
-		const listStore = useListStore();
-		return querySmartList(allTasks.value, "inbox", {
-			inboxListId: listStore.inboxList?.id,
-		});
-	});
-
-	const todayTasks = computed<Task[]>(() => querySmartList(allTasks.value, "today"));
-
-	const tomorrowTasks = computed<Task[]>(() => querySmartList(allTasks.value, "tomorrow"));
-
-	const thisWeekTasks = computed<Task[]>(() => querySmartList(allTasks.value, "this_week"));
-
-	const allTasksList = computed<Task[]>(() => querySmartList(allTasks.value, "all"));
-
-	const trashTasks = computed<Task[]>(() => querySmartList(allTasks.value, "trash"));
-
-	const overdueTasks = computed<Task[]>(() => querySmartList(allTasks.value, "overdue"));
 
 	// Reactive filtered tasks based on filterStore
 	const filteredTasks = computed<Task[]>(() => {
@@ -539,6 +520,45 @@ export const useTaskStore = defineStore("tasks", () => {
 			loading.value = false;
 		}
 	}
+
+	async function batchDelete(ids: string[]): Promise<void> {
+		if (ids.length === 0) return;
+		loading.value = true;
+		error.value = null;
+		try {
+			await apiBatchDeleteTasks(ids);
+			const now = new Date().toISOString();
+			const idsToRemove = new Set<string>(ids);
+			let expanded = true;
+			while (expanded) {
+				expanded = false;
+				for (const t of [...tasks.value, ...allTasks.value]) {
+					if (t.parent_id && idsToRemove.has(t.parent_id) && !idsToRemove.has(t.id)) {
+						idsToRemove.add(t.id);
+						expanded = true;
+					}
+				}
+			}
+
+			tasks.value = tasks.value.filter((t) => !idsToRemove.has(t.id));
+			for (const t of allTasks.value) {
+				if (idsToRemove.has(t.id)) {
+					t.deleted_at = now;
+				}
+			}
+
+			if (activeTaskId.value && idsToRemove.has(activeTaskId.value)) {
+				activeTaskId.value = null;
+			}
+			void useTagStore().fetchTags();
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			error.value = msg;
+			throw err;
+		} finally {
+			loading.value = false;
+		}
+	}
 	async function batchUpdate(options: {
 		task_ids: string[];
 		completed?: boolean;
@@ -621,13 +641,6 @@ export const useTaskStore = defineStore("tasks", () => {
 		countAll,
 		countTrash,
 		countOverdue,
-		inboxTasks,
-		todayTasks,
-		tomorrowTasks,
-		thisWeekTasks,
-		overdueTasks,
-		allTasksList,
-		trashTasks,
 		filteredTasks,
 		getListCount,
 		getListOverdueCount,
@@ -643,6 +656,7 @@ export const useTaskStore = defineStore("tasks", () => {
 		query,
 		sort,
 		batchUpdate,
+		batchDelete,
 		postponeTask,
 		flushDebouncedUpdate: executeDebouncedFlush,
 	};

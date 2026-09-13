@@ -167,5 +167,23 @@ describe("Smart Add Parser and Helpers", () => {
 			expect(parsed.due).toBe("2026-09-10");
 			expect(parsed.tags).toEqual(["groceries"]);
 		});
+
+		it("does not strip unrecognized tokens from title", () => {
+			const parsed = parseSmartAdd(
+				"Read this !not urgent task with ^v2.0 release #validTag",
+				[],
+				fixedBase,
+			);
+			expect(parsed.title).toBe("Read this !not urgent task with ^v2.0 release");
+			expect(parsed.tags).toEqual(["validTag"]);
+			expect(parsed.due).toBeUndefined();
+			expect(parsed.priority).toBeUndefined();
+		});
+
+		it("handles !none and !0 priority tokens by stripping them and leaving priority undefined", () => {
+			const parsed = parseSmartAdd("Task with !none priority", [], fixedBase);
+			expect(parsed.title).toBe("Task with priority");
+			expect(parsed.priority).toBeUndefined();
+		});
 	});
 });

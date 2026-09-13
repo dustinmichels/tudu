@@ -364,6 +364,7 @@ export function parseSmartAdd(
 		prefix: string;
 		value: string;
 		index: number;
+		resolved?: boolean;
 	}> = [];
 
 	let m: RegExpExecArray | null;
@@ -380,7 +381,6 @@ export function parseSmartAdd(
 			});
 		}
 	}
-
 	for (const match of matches) {
 		const { prefix, value } = match;
 		if (prefix === "#") {
@@ -393,30 +393,41 @@ export function parseSmartAdd(
 					tags.push(value);
 				}
 			}
+			match.resolved = true;
 		} else if (prefix === "^") {
 			const resolvedDate = resolveRelativeDueDate(value, baseDate);
 			if (resolvedDate) {
 				due = resolvedDate;
+				match.resolved = true;
 			}
 		} else if (prefix === "!") {
 			const p = value.toLowerCase();
-			if (p === "1" || p === "high" || p === "urgent") priority = 1;
-			else if (p === "2" || p === "med" || p === "medium" || p === "normal") priority = 2;
-			else if (p === "3" || p === "low") priority = 3;
+			if (p === "1" || p === "high" || p === "urgent") {
+				priority = 1;
+				match.resolved = true;
+			} else if (p === "2" || p === "med" || p === "medium" || p === "normal") {
+				priority = 2;
+				match.resolved = true;
+			} else if (p === "3" || p === "low") {
+				priority = 3;
+				match.resolved = true;
+			} else if (p === "none" || p === "0") {
+				priority = undefined;
+				match.resolved = true;
+			}
 		}
 	}
 
-	// Strip the matched tokens from the title
+	// Strip only the successfully resolved tokens from the title
 	// Replace matches in reverse order to keep string indices intact
 	for (let i = matches.length - 1; i >= 0; i--) {
 		const match = matches[i];
-		if (match) {
+		if (match?.resolved) {
 			cleanedTitle =
 				cleanedTitle.slice(0, match.index) +
 				cleanedTitle.slice(match.index + match.fullMatch.length);
 		}
 	}
-
 	// Clean up extra whitespace
 	cleanedTitle = cleanedTitle.replace(/\s+/g, " ").trim();
 

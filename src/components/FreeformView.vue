@@ -441,6 +441,7 @@ function noteClass(task: Task): string {
 					type="button"
 					class="-ml-1 shrink-0 cursor-pointer rounded-md p-1.5 text-zinc-600 transition-colors hover:bg-zinc-100 md:hidden dark:text-zinc-300 dark:hover:bg-zinc-800"
 					title="Toggle navigation sidebar"
+					aria-label="Toggle navigation sidebar"
 					@click="uiStore.toggleSidebar()"
 				>
 					<Menu class="h-5 w-5" />
@@ -498,6 +499,7 @@ function noteClass(task: Task): string {
 					type="button"
 					class="cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
 					:title="uiStore.isDetailOpen ? 'Hide task details' : 'Show task details'"
+					:aria-label="uiStore.isDetailOpen ? 'Hide task details' : 'Show task details'"
 					@click="uiStore.toggleDetail()"
 				>
 					<PanelRightClose v-if="uiStore.isDetailOpen" class="h-4 w-4" />
@@ -651,6 +653,7 @@ function noteClass(task: Task): string {
 							type="button"
 							class="mt-0.5 shrink-0 cursor-pointer rounded-full text-zinc-400 transition-colors hover:text-emerald-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-500"
 							:title="task.completed ? 'Mark incomplete' : 'Mark complete'"
+							:aria-label="task.completed ? 'Mark incomplete' : 'Mark complete'"
 							@click="toggleTask($event, task)"
 						>
 							<Check
@@ -696,6 +699,9 @@ function noteClass(task: Task): string {
 								type="button"
 								class="shrink-0 cursor-pointer text-zinc-400 hover:text-emerald-600 transition-colors focus-visible:outline-2 focus-visible:outline-emerald-500"
 								:title="subtask.completed ? 'Mark subtask incomplete' : 'Mark subtask complete'"
+								:aria-label="
+									subtask.completed ? 'Mark subtask incomplete' : 'Mark subtask complete'
+								"
 								@click.stop="toggleTask($event, subtask)"
 							>
 								<Check v-if="subtask.completed" class="h-3.5 w-3.5 text-emerald-600" />

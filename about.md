@@ -1,6 +1,7 @@
 # TuDu Initial Concept & Vision (Archived)
 
 > **Note**: This document captures the initial project concept and early requirements for TuDu.
+>
 > - For up-to-date user documentation, architecture, and guides, see [README.md](README.md).
 > - For comprehensive data models, cross-system interoperability, and OpenTask JSON specifications, see [standard.md](standard.md).
 

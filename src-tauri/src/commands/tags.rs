@@ -253,6 +253,131 @@ pub async fn remove_tag(
     remove_tag_impl(&state.conn, task_id, tag_id).await
 }
 
+pub async fn batch_assign_tag_impl(
+    conn: &Connection,
+    task_ids: Vec<String>,
+    tag_id: String,
+) -> Result<(), String> {
+    if task_ids.is_empty() {
+        return Ok(());
+    }
+
+    let mut tag_rows = conn
+        .query(
+            "SELECT id FROM tags WHERE (id = ?1 OR name = ?1) AND deleted_at IS NULL",
+            params![tag_id.clone()],
+        )
+        .await
+        .map_err(|e| format!("Failed to verify tag: {}", e))?;
+
+    let resolved_tag_id = if let Some(row) = tag_rows
+        .next()
+        .await
+        .map_err(|e| format!("Failed to fetch tag row: {}", e))?
+    {
+        row.get::<String>(0).map_err(|e| format!("Failed to read tag ID: {}", e))?
+    } else {
+        let new_tag = create_tag_impl(conn, tag_id.clone(), None).await?;
+        new_tag.id
+    };
+
+    let now = now_iso();
+    for chunk in task_ids.chunks(500) {
+        let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "INSERT INTO task_tags (task_id, tag_id, created_at, updated_at)
+             SELECT id, ?, ?, ? FROM tasks WHERE id IN ({}) AND deleted_at IS NULL
+             ON CONFLICT(task_id, tag_id) DO UPDATE SET deleted_at = NULL, updated_at = ?",
+            placeholders
+        );
+        let mut params: Vec<libsql::Value> = vec![
+            libsql::Value::Text(resolved_tag_id.clone()),
+            libsql::Value::Text(now.clone()),
+            libsql::Value::Text(now.clone()),
+        ];
+        for id in chunk {
+            params.push(libsql::Value::Text(id.clone()));
+        }
+        params.push(libsql::Value::Text(now.clone()));
+
+        conn.execute(&sql, params)
+            .await
+            .map_err(|e| format!("Failed to batch assign tag: {}", e))?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn batch_assign_tag(
+    state: State<'_, DbState>,
+    task_ids: Vec<String>,
+    tag_id: String,
+) -> Result<(), String> {
+    batch_assign_tag_impl(&state.conn, task_ids, tag_id).await
+}
+
+pub async fn batch_remove_tag_impl(
+    conn: &Connection,
+    task_ids: Vec<String>,
+    tag_id: String,
+) -> Result<(), String> {
+    if task_ids.is_empty() {
+        return Ok(());
+    }
+
+    let mut tag_rows = conn
+        .query(
+            "SELECT id FROM tags WHERE id = ?1 OR name = ?1",
+            params![tag_id.clone()],
+        )
+        .await
+        .map_err(|e| format!("Failed to verify tag: {}", e))?;
+
+    let resolved_tag_id = if let Some(row) = tag_rows
+        .next()
+        .await
+        .map_err(|e| format!("Failed to fetch tag row: {}", e))?
+    {
+        row.get::<String>(0).map_err(|e| format!("Failed to read tag ID: {}", e))?
+    } else {
+        tag_id
+    };
+
+    let now = now_iso();
+    for chunk in task_ids.chunks(500) {
+        let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "UPDATE task_tags SET deleted_at = ?, updated_at = ?
+             WHERE tag_id = ? AND task_id IN ({}) AND deleted_at IS NULL",
+            placeholders
+        );
+        let mut params: Vec<libsql::Value> = vec![
+            libsql::Value::Text(now.clone()),
+            libsql::Value::Text(now.clone()),
+            libsql::Value::Text(resolved_tag_id.clone()),
+        ];
+        for id in chunk {
+            params.push(libsql::Value::Text(id.clone()));
+        }
+
+        conn.execute(&sql, params)
+            .await
+            .map_err(|e| format!("Failed to batch remove tag: {}", e))?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn batch_remove_tag(
+    state: State<'_, DbState>,
+    task_ids: Vec<String>,
+    tag_id: String,
+) -> Result<(), String> {
+    batch_remove_tag_impl(&state.conn, task_ids, tag_id).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -447,6 +572,43 @@ mod tests {
             let row = rows.next().await.unwrap().expect("has row");
             let assigned_tag_id: String = row.get(0).unwrap();
             assert_eq!(assigned_tag_id, tags[0].id);
+
+            let _ = std::fs::remove_dir_all(temp_dir);
+        });
+    }
+
+    #[test]
+    fn test_batch_assign_and_remove_tag() {
+        tauri::async_runtime::block_on(async {
+            let (conn, temp_dir) = setup_test_conn().await;
+            let list = create_list_impl(&conn, "Work".to_string(), None, None)
+                .await
+                .expect("create list");
+            let t1 = create_task_impl(&conn, list.id.clone(), "Task 1".to_string(), None, None, None)
+                .await
+                .expect("create t1");
+            let t2 = create_task_impl(&conn, list.id.clone(), "Task 2".to_string(), None, None, None)
+                .await
+                .expect("create t2");
+
+            // Batch assign tag "priority"
+            batch_assign_tag_impl(&conn, vec![t1.id.clone(), t2.id.clone()], "priority".to_string())
+                .await
+                .expect("batch assign");
+
+            let tags = get_tags_with_counts_impl(&conn).await.expect("get tags with counts");
+            assert_eq!(tags.len(), 1);
+            assert_eq!(tags[0].name, "priority");
+            assert_eq!(tags[0].task_count, 2);
+
+            // Batch remove tag "priority"
+            batch_remove_tag_impl(&conn, vec![t1.id.clone(), t2.id.clone()], "priority".to_string())
+                .await
+                .expect("batch remove");
+
+            let tags_after = get_tags_with_counts_impl(&conn).await.expect("get tags after remove");
+            assert_eq!(tags_after.len(), 1);
+            assert_eq!(tags_after[0].task_count, 0);
 
             let _ = std::fs::remove_dir_all(temp_dir);
         });

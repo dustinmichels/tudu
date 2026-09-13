@@ -707,9 +707,10 @@ async fn import_backup_inner(
                     .is_some()
                 {
                     conn.execute(
-                        "UPDATE tasks SET title = ?2, completed = ?3, completed_at = ?4, status = ?5, position = ?6, updated_at = ?7, deleted_at = NULL WHERE id = ?1",
+                        "UPDATE tasks SET parent_id = ?2, title = ?3, completed = ?4, completed_at = ?5, status = ?6, position = ?7, updated_at = ?8, deleted_at = NULL WHERE id = ?1",
                         params![
                             item.id.clone(),
+                            task_id.clone(),
                             item.title,
                             sub_comp,
                             sub_comp_at,
@@ -726,7 +727,7 @@ async fn import_backup_inner(
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
                         params![
                             item.id.clone(),
-                            None::<String>,
+                            Some(task_id.clone()),
                             effective_list_id.clone(),
                             item.title,
                             sub_comp,
@@ -739,7 +740,6 @@ async fn import_backup_inner(
                     .await
                     .map_err(|e| format!("Failed to insert checklist subtask: {}", e))?;
                 }
-                pending_parent_updates.push((item.id.clone(), task_id.clone()));
                 tasks_imported += 1;
             }
         }

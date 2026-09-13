@@ -129,6 +129,20 @@ describe("UI Store (useUIStore)", () => {
 		expect(uiStore.isDetailOpen).toBeFalse();
 	});
 
+	test("setViewMode triggers onSwitchView cleanup exactly once on mode switch", () => {
+		const uiStore = useUIStore();
+		const taskStore = useTaskStore();
+		let callCount = 0;
+		const originalSetActiveTask = taskStore.setActiveTask;
+		taskStore.setActiveTask = (id: string | null) => {
+			callCount++;
+			return originalSetActiveTask(id);
+		};
+
+		uiStore.setViewMode("calendar");
+		expect(callCount).toBe(1);
+	});
+
 	test("calling setViewMode with the same mode does not collapse or deselect", () => {
 		const uiStore = useUIStore();
 		const taskStore = useTaskStore();

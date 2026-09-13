@@ -305,6 +305,23 @@ describe("Task Detail & Subtasks", () => {
 		expect(taskStore.activeTask?.title).toBe("Updated Project Title");
 	});
 
+	test("Task detail description: editable task description and updateTask API", async () => {
+		const taskStore = useTaskStore();
+		taskStore.allTasks = [...mockTasks];
+		taskStore.tasks = [...mockTasks];
+		taskStore.setActiveTask("task-parent");
+
+		expect(taskStore.activeTask?.description).toBe("Detailed description");
+
+		const updated = await taskStore.updateTask({
+			id: "task-parent",
+			description: "Updated project description",
+		});
+
+		expect(updated.description).toBe("Updated project description");
+		expect(taskStore.activeTask?.description).toBe("Updated project description");
+	});
+
 	test("Metadata property rows: due, repeats, priority, location, url", async () => {
 		const taskStore = useTaskStore();
 		taskStore.allTasks = [...mockTasks];

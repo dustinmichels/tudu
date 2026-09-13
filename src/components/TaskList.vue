@@ -4,12 +4,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useFilterStore } from "../stores/filters.ts";
 import { useListStore } from "../stores/lists.ts";
 import { useTaskStore } from "../stores/tasks.ts";
-import {
-	compareByCompletion,
-	compareByDueDate,
-	compareByPriority,
-	type SortOrder,
-} from "../utils/sorting.ts";
+import { sortTasks } from "../utils/sorting.ts";
 import HomeCaptureView from "./TaskList/HomeCaptureView.vue";
 import TaskBatchToolbar from "./TaskList/TaskBatchToolbar.vue";
 import TaskContextMenu from "./TaskList/TaskContextMenu.vue";
@@ -28,21 +23,21 @@ const hasActiveSelection = computed(
 // ---------------------------------------------------------------------------
 // Sort State
 // ---------------------------------------------------------------------------
-const activeSortField = ref<SortFieldOption | null>(null);
-const activeSortOrder = ref<SortOrder>("asc");
+// Sort State (driven by filterStore as single source of truth)
+// ---------------------------------------------------------------------------
+const activeSortField = computed(() => filterStore.sortBy as SortFieldOption);
+const activeSortOrder = computed(() => filterStore.sortOrder);
 
 function handleSortClick(field: SortFieldOption) {
-	if (activeSortField.value === field) {
-		if (activeSortOrder.value === "asc") {
-			activeSortOrder.value = "desc";
+	if (filterStore.sortBy === field) {
+		if (filterStore.sortOrder === "asc") {
+			filterStore.setSorting(field, "desc");
 		} else {
 			// third click clears back to default order
-			activeSortField.value = null;
-			activeSortOrder.value = "asc";
+			filterStore.setSorting("priority", "asc");
 		}
 	} else {
-		activeSortField.value = field;
-		activeSortOrder.value = "asc";
+		filterStore.setSorting(field, "asc");
 	}
 }
 
@@ -59,45 +54,15 @@ const visibleTasks = computed(() => {
 
 	const field = activeSortField.value;
 	const order = activeSortOrder.value;
-	const dir = order === "asc" ? 1 : -1;
 
 	// Build list name map once for "by list" sort
 	const listMap = new Map(listStore.lists.map((l) => [l.id, l.name.toLowerCase()]));
 
-	return [...rootTasks].sort((a, b) => {
-		// Completed tasks always sink to bottom
-		const cmpCompletion = compareByCompletion(a, b);
-		if (cmpCompletion !== 0) return cmpCompletion;
-
-		// No user-chosen sort: preserve store order
-		if (!field) return 0;
-
-		if (field === "priority") return compareByPriority(a, b, order);
-		if (field === "due") return compareByDueDate(a, b, order);
-
-		if (field === "created_at") {
-			const ta = a.created_at;
-			const tb = b.created_at;
-			if (!ta && !tb) return 0;
-			if (!ta) return 1;
-			if (!tb) return -1;
-			return ta < tb ? -dir : ta > tb ? dir : 0;
-		}
-
-		if (field === "list") {
-			const la = listMap.get(a.list_id) ?? "";
-			const lb = listMap.get(b.list_id) ?? "";
-			return la < lb ? -dir : la > lb ? dir : 0;
-		}
-
-		if (field === "tags") {
-			// Sort by first tag name
-			const ta = a.tags?.[0]?.name?.toLowerCase() ?? "\uFFFF";
-			const tb = b.tags?.[0]?.name?.toLowerCase() ?? "\uFFFF";
-			return ta < tb ? -dir : ta > tb ? dir : 0;
-		}
-
-		return 0;
+	return sortTasks(rootTasks, {
+		field,
+		order,
+		completedToEnd: true,
+		listMap,
 	});
 });
 
@@ -149,8 +114,8 @@ function handleTaskContextMenu(e: MouseEvent, taskId: string) {
 	taskStore.setActiveTask(taskId);
 	contextMenu.value = {
 		visible: true,
-		x: Math.min(e.clientX, window.innerWidth - 200),
-		y: Math.min(e.clientY, window.innerHeight - 240),
+		x: Math.min(e.clientX, window.innerWidth - 210),
+		y: Math.min(e.clientY, window.innerHeight - 260),
 		taskId,
 	};
 }

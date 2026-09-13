@@ -111,6 +111,28 @@ function handleSelectTask(event: MouseEvent, taskId: string) {
 	taskStore.setActiveTask(taskId);
 	uiStore.toggleDetail(true);
 }
+function handleKeydownTask(event: KeyboardEvent, taskId: string) {
+	if (event.key === "Enter" || event.key === " ") {
+		if (event.target !== event.currentTarget) {
+			const target = event.target as HTMLElement;
+			if (
+				target.tagName === "BUTTON" ||
+				target.tagName === "INPUT" ||
+				target.tagName === "A" ||
+				target.closest("button")
+			) {
+				return;
+			}
+		}
+		event.preventDefault();
+		if (event.metaKey || event.ctrlKey) {
+			emit("toggle-select", event as unknown as MouseEvent, taskId);
+			return;
+		}
+		taskStore.setActiveTask(taskId);
+		uiStore.toggleDetail(true);
+	}
+}
 
 async function handleToggleComplete(event: MouseEvent, taskId: string) {
 	event.stopPropagation();
@@ -177,9 +199,14 @@ function getTaskTags(taskId: string): Tag[] {
 	<div class="space-y-1">
 		<div
 			:data-task-id="task.id"
+			tabindex="0"
+			role="button"
+			:aria-label="`Task: ${task.title}`"
+			aria-keyshortcuts="j k c p Enter Space"
 			@click="handleSelectTask($event, task.id)"
+			@keydown="handleKeydownTask($event, task.id)"
 			@contextmenu="emit('context-menu', $event, task.id)"
-			class="group flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg border text-sm cursor-pointer transition-all"
+			class="group flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg border text-sm cursor-pointer transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50"
 			:class="[
 				task.id === taskStore.activeTaskId
 					? 'bg-emerald-50/70 dark:bg-emerald-950/40 border-emerald-400 dark:border-emerald-700 shadow-2xs'
@@ -200,6 +227,7 @@ function getTaskTags(taskId: string): Tag[] {
 						'opacity-0 group-hover:opacity-100': !selectedTaskIds.has(task.id),
 					}"
 					:title="selectedTaskIds.has(task.id) ? 'Deselect task' : 'Select task'"
+					:aria-label="selectedTaskIds.has(task.id) ? 'Deselect task' : 'Select task'"
 				>
 					<CheckSquare
 						v-if="selectedTaskIds.has(task.id)"
@@ -214,6 +242,7 @@ function getTaskTags(taskId: string): Tag[] {
 					@click="handleToggleComplete($event, task.id)"
 					class="shrink-0 text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors cursor-pointer"
 					:title="task.completed ? 'Mark incomplete' : 'Mark complete'"
+					:aria-label="task.completed ? 'Mark incomplete' : 'Mark complete'"
 				>
 					<CheckCircle2
 						v-if="task.completed"
@@ -272,6 +301,9 @@ function getTaskTags(taskId: string): Tag[] {
 							? 'Click to collapse subtasks'
 							: `${subtaskCount.incomplete} of ${subtaskCount.total} subtasks remaining. Click to expand.`
 					"
+					:aria-label="
+						uiStore.isTaskSubtasksExpanded(task.id) ? 'Collapse subtasks' : 'Expand subtasks'
+					"
 					:data-subtask-toggle-id="task.id"
 				>
 					<ChevronDown
@@ -329,6 +361,7 @@ function getTaskTags(taskId: string): Tag[] {
 				<button
 					type="button"
 					title="Delete task"
+					aria-label="Delete task"
 					class="opacity-0 group-hover:opacity-100 hover:text-red-500 p-1 text-zinc-400 transition-opacity cursor-pointer"
 					@click="handleDeleteTask($event, task.id)"
 				>
@@ -348,9 +381,14 @@ function getTaskTags(taskId: string): Tag[] {
 				v-for="subtask in subtasks"
 				:key="subtask.id"
 				:data-task-id="subtask.id"
+				tabindex="0"
+				role="button"
+				:aria-label="`Subtask: ${subtask.title}`"
+				aria-keyshortcuts="j k c p Enter Space"
 				@click="handleSelectTask($event, subtask.id)"
+				@keydown="handleKeydownTask($event, subtask.id)"
 				@contextmenu="emit('context-menu', $event, subtask.id)"
-				class="group/sub flex items-center justify-between gap-2.5 px-2.5 py-1.5 rounded-md border text-xs cursor-pointer transition-all"
+				class="group/sub flex items-center justify-between gap-2.5 px-2.5 py-1.5 rounded-md border text-xs cursor-pointer transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50"
 				:class="[
 					subtask.id === taskStore.activeTaskId
 						? 'bg-emerald-50/70 dark:bg-emerald-950/40 border-emerald-400 dark:border-emerald-700 shadow-2xs'
@@ -371,6 +409,7 @@ function getTaskTags(taskId: string): Tag[] {
 							'opacity-0 group-hover/sub:opacity-100': !selectedTaskIds.has(subtask.id),
 						}"
 						:title="selectedTaskIds.has(subtask.id) ? 'Deselect subtask' : 'Select subtask'"
+						:aria-label="selectedTaskIds.has(subtask.id) ? 'Deselect subtask' : 'Select subtask'"
 					>
 						<CheckSquare
 							v-if="selectedTaskIds.has(subtask.id)"
@@ -385,6 +424,7 @@ function getTaskTags(taskId: string): Tag[] {
 						@click="handleToggleComplete($event, subtask.id)"
 						class="shrink-0 text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors cursor-pointer"
 						:title="subtask.completed ? 'Mark incomplete' : 'Mark complete'"
+						:aria-label="subtask.completed ? 'Mark incomplete' : 'Mark complete'"
 					>
 						<CheckCircle2
 							v-if="subtask.completed"
@@ -468,6 +508,7 @@ function getTaskTags(taskId: string): Tag[] {
 					<button
 						type="button"
 						title="Delete subtask"
+						aria-label="Delete subtask"
 						class="opacity-0 group-hover/sub:opacity-100 hover:text-red-500 p-0.5 text-zinc-400 transition-opacity cursor-pointer"
 						@click="handleDeleteTask($event, subtask.id)"
 					>

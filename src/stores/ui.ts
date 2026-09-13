@@ -35,7 +35,6 @@ export const useUIStore = defineStore("ui", () => {
 	function setViewMode(mode: "list" | "calendar" | "freeform") {
 		if (viewMode.value !== mode) {
 			viewMode.value = mode;
-			onSwitchView();
 		}
 	}
 

@@ -154,7 +154,12 @@ export function matchesSmartView(
 			return context.inboxListId != null && task.list_id === context.inboxListId;
 
 		case "today":
-			return task.completed ? isToday(task.due, now) : isTodayOrOverdue(task.due, now);
+			return task.completed
+				? isToday(task.due, now) ||
+						(isTodayOrOverdue(task.due, now) &&
+							task.completed_at !== null &&
+							isToday(task.completed_at, now))
+				: isTodayOrOverdue(task.due, now);
 
 		case "tomorrow":
 			return isTomorrow(task.due, now);

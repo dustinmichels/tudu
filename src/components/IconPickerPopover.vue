@@ -139,6 +139,7 @@ onUnmounted(() => {
 					@click="emit('close')"
 					class="p-0.5 rounded text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer"
 					title="Close"
+					aria-label="Close"
 				>
 					<X class="w-3.5 h-3.5" />
 				</button>
@@ -160,6 +161,7 @@ onUnmounted(() => {
 							: 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100',
 					]"
 					:title="item.label"
+					:aria-label="item.label"
 				>
 					<component
 						:is="item.component"

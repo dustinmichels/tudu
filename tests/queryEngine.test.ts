@@ -114,6 +114,22 @@ describe("Smart List Query Engine - Today View Alignment", () => {
 		expect(matchesSmartView(tomorrowCompleted, "today", { now: fixedNow })).toBeFalse();
 		expect(matchesSmartView(noDueDateCompleted, "today", { now: fixedNow })).toBeFalse();
 	});
+
+	test("matchesSmartView('today') keeps overdue tasks completed today visible", () => {
+		const overdueCompletedToday = makeTask({
+			due: "2026-09-08",
+			completed: true,
+			completed_at: "2026-09-10T10:00:00Z",
+		});
+		const overdueCompletedPast = makeTask({
+			due: "2026-09-08",
+			completed: true,
+			completed_at: "2026-09-09T10:00:00Z",
+		});
+
+		expect(matchesSmartView(overdueCompletedToday, "today", { now: fixedNow })).toBeTrue();
+		expect(matchesSmartView(overdueCompletedPast, "today", { now: fixedNow })).toBeFalse();
+	});
 });
 
 describe("Smart List Query Engine - This Week View Alignment", () => {

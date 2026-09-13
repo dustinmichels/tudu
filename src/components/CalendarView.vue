@@ -9,6 +9,7 @@ import {
 	ChevronRight,
 	Inbox,
 	ListFilter,
+	ListTree,
 	Menu,
 	PanelRight,
 	PanelRightClose,
@@ -136,6 +137,12 @@ interface CalendarCell {
 	isToday: boolean;
 	tasks: Task[];
 }
+function toLocalDateKey(date: Date): string {
+	const y = date.getFullYear();
+	const m = String(date.getMonth() + 1).padStart(2, "0");
+	const d = String(date.getDate()).padStart(2, "0");
+	return `${y}-${m}-${d}`;
+}
 
 const calendarCells = computed<CalendarCell[]>(() => {
 	const year = currentYear.value;
@@ -147,6 +154,19 @@ const calendarCells = computed<CalendarCell[]>(() => {
 	// Anchor: the Sunday on or before the 1st
 	const gridStart = new Date(year, month, 1 - startDow);
 
+	const tasksByDate = new Map<string, Task[]>();
+	for (const t of calendarTasks.value) {
+		const d = parseDueDateToLocal(t.due);
+		if (!d) continue;
+		const key = toLocalDateKey(d);
+		const existing = tasksByDate.get(key);
+		if (existing) {
+			existing.push(t);
+		} else {
+			tasksByDate.set(key, [t]);
+		}
+	}
+
 	const cells: CalendarCell[] = [];
 
 	for (let i = 0; i < 42; i++) {
@@ -155,12 +175,7 @@ const calendarCells = computed<CalendarCell[]>(() => {
 		const inMonth = date.getMonth() === month && date.getFullYear() === year;
 		const isToday = date.getTime() === today.getTime();
 
-		const dayTasks = calendarTasks.value.filter((t) => {
-			const d = parseDueDateToLocal(t.due);
-			if (!d) return false;
-			d.setHours(0, 0, 0, 0);
-			return d.getTime() === date.getTime();
-		});
+		const dayTasks = [...(tasksByDate.get(toLocalDateKey(date)) ?? [])];
 
 		// High priority first, then by title
 		dayTasks.sort((a, b) => {
@@ -188,11 +203,33 @@ function openTask(task: Task) {
 	uiStore.toggleDetail(true);
 }
 
-// ── Chip styling ──────────────────────────────────────────────────────────────
+const parentTaskMap = computed(() => {
+	const map = new Map<string, Task>();
+	for (const t of taskStore.allTasks) {
+		map.set(t.id, t);
+	}
+	return map;
+});
+
+function getParentTitle(parentId: string | null | undefined): string | null {
+	if (!parentId) return null;
+	return parentTaskMap.value.get(parentId)?.title ?? null;
+}
+
+function getChipTitle(task: Task): string {
+	if (task.parent_id) {
+		const parentTitle = getParentTitle(task.parent_id);
+		if (parentTitle) {
+			return `Subtask of "${parentTitle}": ${task.title}`;
+		}
+		return `Subtask: ${task.title}`;
+	}
+	return task.title;
+}
 
 function chipClass(task: Task): string {
 	const base =
-		"w-full text-left text-xs px-1.5 py-0.5 rounded truncate cursor-pointer transition-opacity hover:opacity-80";
+		"w-full text-left text-xs px-1.5 py-0.5 rounded cursor-pointer transition-opacity hover:opacity-80 flex items-center gap-1 min-w-0";
 	const color = task.completed
 		? "bg-zinc-100 text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500 line-through"
 		: priorityColor(task.priority);
@@ -239,6 +276,7 @@ onMounted(async () => {
 					@click="uiStore.toggleSidebar()"
 					class="md:hidden p-1.5 -ml-1 rounded-md text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer shrink-0"
 					title="Toggle Navigation Sidebar"
+					aria-label="Toggle Navigation Sidebar"
 				>
 					<Menu class="w-5 h-5" />
 				</button>
@@ -307,6 +345,7 @@ onMounted(async () => {
 						@click="prevMonth"
 						class="p-1 sm:p-1.5 rounded-md text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
 						title="Previous month"
+						aria-label="Previous month"
 					>
 						<ChevronLeft class="w-4 h-4" />
 					</button>
@@ -320,6 +359,7 @@ onMounted(async () => {
 						@click="nextMonth"
 						class="p-1 sm:p-1.5 rounded-md text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
 						title="Next month"
+						aria-label="Next month"
 					>
 						<ChevronRight class="w-4 h-4" />
 					</button>
@@ -346,6 +386,9 @@ onMounted(async () => {
 					:title="
 						taskStore.includeCompleted ? 'Hide completed tasks (⌘H)' : 'Show completed tasks (⌘H)'
 					"
+					:aria-label="
+						taskStore.includeCompleted ? 'Hide completed tasks (⌘H)' : 'Show completed tasks (⌘H)'
+					"
 				>
 					<ListFilter class="w-3.5 h-3.5" />
 					<span class="hidden md:inline">{{
@@ -358,6 +401,7 @@ onMounted(async () => {
 					type="button"
 					@click="uiStore.toggleDetail()"
 					:title="uiStore.isDetailOpen ? 'Collapse task details' : 'Expand task details'"
+					:aria-label="uiStore.isDetailOpen ? 'Collapse task details' : 'Expand task details'"
 					class="p-1 sm:p-1.5 rounded-md border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 transition-colors cursor-pointer"
 				>
 					<PanelRightClose v-if="uiStore.isDetailOpen" class="w-4 h-4" />
@@ -416,10 +460,22 @@ onMounted(async () => {
 						:data-task-id="task.id"
 						type="button"
 						:class="chipClass(task)"
-						:title="task.title"
+						:title="getChipTitle(task)"
 						@click="openTask(task)"
 					>
-						{{ task.title }}
+						<ListTree
+							v-if="task.parent_id"
+							class="w-3 h-3 shrink-0 opacity-70"
+							aria-hidden="true"
+						/>
+						<span class="truncate min-w-0">
+							<span
+								v-if="task.parent_id && getParentTitle(task.parent_id)"
+								class="opacity-60 font-normal"
+								>{{ getParentTitle(task.parent_id) }} /
+							</span>
+							{{ task.title }}
+						</span>
 					</button>
 
 					<!-- Overflow indicator -->

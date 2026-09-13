@@ -208,6 +208,7 @@ const shortcutCategories: ShortcutCategory[] = [
 					@click="closeModal"
 					class="p-1 rounded-md text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
 					title="Close modal"
+					aria-label="Close modal"
 					data-close-shortcuts-modal
 				>
 					<X class="w-5 h-5" />

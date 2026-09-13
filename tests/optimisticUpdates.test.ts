@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { createPinia, setActivePinia } from "pinia";
 import type { Task, UpdateTaskInput } from "../src/models/index.ts";
 import { useTaskStore } from "../src/stores/tasks.ts";
@@ -252,28 +252,33 @@ describe("Optimistic Updates, Quick Actions & Keyboard Shortcuts", () => {
 	});
 
 	it("rolls back optimistic changes when database write fails", async () => {
-		const store = useTaskStore();
-		await store.fetchTasks("list-inbox");
-		await store.fetchAllTasks();
-
-		shouldFailNextUpdate = true;
-		const updatePromise = store.updateTask(
-			{ id: "task-1", title: "Should Fail" },
-			{ debounceMs: 0 },
-		);
-
-		// Optimistic before failure
-		expect(store.tasks.find((t) => t.id === "task-1")?.title).toBe("Should Fail");
-
+		const consoleSpy = spyOn(console, "error").mockImplementation(() => {});
 		try {
-			await updatePromise;
-			expect(true).toBe(false); // Should not reach
-		} catch (err) {
-			expect(err).toBeDefined();
-		}
+			const store = useTaskStore();
+			await store.fetchTasks("list-inbox");
+			await store.fetchAllTasks();
 
-		// Rolled back to initial title
-		expect(store.tasks.find((t) => t.id === "task-1")?.title).toBe("Initial Task");
-		expect(store.allTasks.find((t) => t.id === "task-1")?.title).toBe("Initial Task");
+			shouldFailNextUpdate = true;
+			const updatePromise = store.updateTask(
+				{ id: "task-1", title: "Should Fail" },
+				{ debounceMs: 0 },
+			);
+
+			// Optimistic before failure
+			expect(store.tasks.find((t) => t.id === "task-1")?.title).toBe("Should Fail");
+
+			try {
+				await updatePromise;
+				expect(true).toBe(false); // Should not reach
+			} catch (err) {
+				expect(err).toBeDefined();
+			}
+
+			// Rolled back to initial title
+			expect(store.tasks.find((t) => t.id === "task-1")?.title).toBe("Initial Task");
+			expect(store.allTasks.find((t) => t.id === "task-1")?.title).toBe("Initial Task");
+		} finally {
+			consoleSpy.mockRestore();
+		}
 	});
 });

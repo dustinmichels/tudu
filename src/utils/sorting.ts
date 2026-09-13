@@ -1,14 +1,15 @@
 import type { Task } from "../models/index.ts";
 import { parseDueDateToLocal } from "../services/queryEngine.ts";
 
-export type SortField = "priority" | "due" | "title" | "manual" | "created_at";
+export type SortField = "priority" | "due" | "title" | "manual" | "created_at" | "list" | "tags";
 export type SortOrder = "asc" | "desc";
 
 export interface SortOptions {
-	field?: SortField;
+	field?: SortField | null;
 	order?: SortOrder;
 	completedToEnd?: boolean;
 	manualOrder?: string[] | Map<string, number>;
+	listMap?: Map<string, string> | Record<string, string>;
 }
 
 /**
@@ -83,6 +84,67 @@ export function compareByTitle(a: Task, b: Task, order: SortOrder = "asc"): numb
 }
 
 /**
+ * Compare two tasks by creation timestamp.
+ *
+ * asc: oldest created first -> newest
+ * desc: newest created first -> oldest
+ */
+export function compareByCreatedAt(a: Task, b: Task, order: SortOrder = "asc"): number {
+	const aCreated = a.created_at ? new Date(a.created_at).getTime() : 0;
+	const bCreated = b.created_at ? new Date(b.created_at).getTime() : 0;
+	if (aCreated !== bCreated) {
+		return order === "asc" ? aCreated - bCreated : bCreated - aCreated;
+	}
+	return compareByTitle(a, b, order);
+}
+
+/**
+ * Compare two tasks by list name (or list ID fallback).
+ */
+export function compareByList(
+	a: Task,
+	b: Task,
+	order: SortOrder = "asc",
+	listMap?: Map<string, string> | Record<string, string>,
+): number {
+	const getListName = (listId: string): string => {
+		if (!listMap) return listId.toLowerCase();
+		if (listMap instanceof Map) {
+			return (listMap.get(listId) ?? listId).toLowerCase();
+		}
+		return (listMap[listId] ?? listId).toLowerCase();
+	};
+
+	const la = getListName(a.list_id);
+	const lb = getListName(b.list_id);
+
+	if (la !== lb) {
+		const cmp = la.localeCompare(lb);
+		return order === "asc" ? cmp : -cmp;
+	}
+	return compareByTitle(a, b, "asc");
+}
+
+/**
+ * Compare two tasks by their first tag name alphabetically.
+ * Tasks without tags are placed at the end in both asc and desc orders.
+ */
+export function compareByTags(a: Task, b: Task, order: SortOrder = "asc"): number {
+	const aTag = a.tags?.[0]?.name?.toLowerCase() ?? null;
+	const bTag = b.tags?.[0]?.name?.toLowerCase() ?? null;
+
+	if (aTag === null && bTag === null) return 0;
+	if (aTag === null) return 1;
+	if (bTag === null) return -1;
+
+	if (aTag !== bTag) {
+		const cmp = aTag.localeCompare(bTag);
+		return order === "asc" ? cmp : -cmp;
+	}
+	return compareByTitle(a, b, "asc");
+}
+
+/**
  * Compare two tasks by manual order or creation timestamp.
  * If manual order array/map is supplied, it ranks by index; otherwise by created_at.
  */
@@ -108,25 +170,24 @@ export function compareByManual(
 		}
 	}
 
-	// Fallback to created_at
-	const aCreated = a.created_at ? new Date(a.created_at).getTime() : 0;
-	const bCreated = b.created_at ? new Date(b.created_at).getTime() : 0;
-	if (aCreated !== bCreated) {
-		return order === "asc" ? aCreated - bCreated : bCreated - aCreated;
-	}
-	return compareByTitle(a, b, order);
+	return compareByCreatedAt(a, b, order);
 }
 
 /**
  * Build a comparator function based on SortOptions.
  */
 export function createTaskComparator(options: SortOptions = {}): (a: Task, b: Task) => number {
-	const { field = "priority", order = "asc", completedToEnd = false, manualOrder } = options;
+	const field = options.field !== undefined ? options.field : "priority";
+	const { order = "asc", completedToEnd = false, manualOrder, listMap } = options;
 
 	return (a: Task, b: Task): number => {
 		// Completed tasks sent to the bottom if requested
 		if (completedToEnd && a.completed !== b.completed) {
 			return compareByCompletion(a, b);
+		}
+
+		if (!field) {
+			return 0;
 		}
 
 		let cmp = 0;
@@ -154,7 +215,19 @@ export function createTaskComparator(options: SortOptions = {}): (a: Task, b: Ta
 				break;
 
 			case "created_at":
-				cmp = compareByManual(a, b, order);
+				cmp = compareByCreatedAt(a, b, order);
+				break;
+
+			case "list":
+				cmp = compareByList(a, b, order, listMap);
+				if (cmp === 0) cmp = compareByPriority(a, b, "asc");
+				if (cmp === 0) cmp = compareByDueDate(a, b, "asc");
+				break;
+
+			case "tags":
+				cmp = compareByTags(a, b, order);
+				if (cmp === 0) cmp = compareByPriority(a, b, "asc");
+				if (cmp === 0) cmp = compareByDueDate(a, b, "asc");
 				break;
 
 			default:
@@ -171,42 +244,4 @@ export function createTaskComparator(options: SortOptions = {}): (a: Task, b: Ta
 export function sortTasks(tasks: Task[], options: SortOptions = {}): Task[] {
 	const comparator = createTaskComparator(options);
 	return [...tasks].sort(comparator);
-}
-
-export function sortByPriority(
-	tasks: Task[],
-	order: SortOrder = "asc",
-	completedToEnd = false,
-): Task[] {
-	return sortTasks(tasks, { field: "priority", order, completedToEnd });
-}
-
-export function sortByDueDate(
-	tasks: Task[],
-	order: SortOrder = "asc",
-	completedToEnd = false,
-): Task[] {
-	return sortTasks(tasks, { field: "due", order, completedToEnd });
-}
-
-export function sortByTitle(
-	tasks: Task[],
-	order: SortOrder = "asc",
-	completedToEnd = false,
-): Task[] {
-	return sortTasks(tasks, { field: "title", order, completedToEnd });
-}
-
-export function sortByManual(
-	tasks: Task[],
-	order: SortOrder = "asc",
-	completedToEnd = false,
-	manualOrder?: string[] | Map<string, number>,
-): Task[] {
-	return sortTasks(tasks, {
-		field: "manual",
-		order,
-		completedToEnd,
-		manualOrder,
-	});
 }

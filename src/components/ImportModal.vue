@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { AlertCircle, CheckCircle2, FileUp, Loader2, Upload, X } from "lucide-vue-next";
-import { onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
+import type { OpenTaskDocument } from "../models/index.ts";
 import { api } from "../services/api.ts";
 import { mapRememberTheMilkToOpenTask } from "../services/rememberTheMilk.ts";
 import { useListStore } from "../stores/lists.ts";
@@ -13,7 +14,7 @@ const listStore = useListStore();
 const taskStore = useTaskStore();
 const tagStore = useTagStore();
 
-type ProviderId = "rtm" | "todoist";
+type ProviderId = "opentask" | "rtm" | "todoist";
 
 interface ProviderOption {
 	id: ProviderId;
@@ -24,6 +25,13 @@ interface ProviderOption {
 }
 
 const providers: ProviderOption[] = [
+	{
+		id: "opentask",
+		name: "OpenTask / TuDu Backup",
+		description:
+			"Import lists, tasks, notes, tags, and reminders directly from an OpenTask v1.0 or TuDu JSON backup.",
+		enabled: true,
+	},
 	{
 		id: "rtm",
 		name: "Remember the Milk",
@@ -40,13 +48,28 @@ const providers: ProviderOption[] = [
 	},
 ];
 
-const selectedProvider = ref<ProviderId>("rtm");
+const selectedProvider = ref<ProviderId>("opentask");
 const fileInputRef = ref<HTMLInputElement | null>(null);
 const isImporting = ref(false);
 const isDraggingOver = ref(false);
 const dragCounter = ref(0);
 const errorMessage = ref<string | null>(null);
 const successMessage = ref<string | null>(null);
+
+const dropzoneText = computed(() => {
+	const name = providers.find((p) => p.id === selectedProvider.value)?.name ?? "JSON";
+	if (isDraggingOver.value) {
+		return `Drop ${name} file here`;
+	}
+	return `Click to upload or drag & drop ${name} file`;
+});
+
+const dropzoneSubtext = computed(() => {
+	if (selectedProvider.value === "opentask") {
+		return "Compatible with native TuDu backups or OpenTask v1.0 JSON documents";
+	}
+	return "Compatible with RTM raw JSON backups or OpenTask-aligned exports";
+});
 function handleSelectProvider(provider: ProviderOption) {
 	if (!provider.enabled) return;
 	selectedProvider.value = provider.id;
@@ -74,10 +97,17 @@ async function processFile(file: File) {
 		const text = await file.text();
 		const parsedJson = JSON.parse(text);
 
-		if (selectedProvider.value !== "rtm") {
+		let openTaskDoc: OpenTaskDocument;
+		if (selectedProvider.value === "opentask") {
+			if (!parsedJson || typeof parsedJson !== "object" || parsedJson.version !== "1.0") {
+				throw new Error("Invalid OpenTask backup. Expected a JSON document with version '1.0'.");
+			}
+			openTaskDoc = parsedJson as OpenTaskDocument;
+		} else if (selectedProvider.value === "rtm") {
+			openTaskDoc = mapRememberTheMilkToOpenTask(parsedJson);
+		} else {
 			throw new Error("Provider not yet implemented.");
 		}
-		const openTaskDoc = mapRememberTheMilkToOpenTask(parsedJson);
 
 		const result = await api.backup.import(openTaskDoc);
 
@@ -194,6 +224,7 @@ onUnmounted(() => {
 					@click="closeModal"
 					class="p-1 rounded-md text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
 					title="Close modal"
+					aria-label="Close modal"
 				>
 					<X class="w-5 h-5" />
 				</button>
@@ -291,14 +322,10 @@ onUnmounted(() => {
 						</div>
 						<div>
 							<p class="text-sm font-medium text-zinc-800 dark:text-zinc-200">
-								{{
-									isDraggingOver
-										? "Drop Remember the Milk JSON file here"
-										: "Click to upload or drag & drop Remember the Milk JSON file"
-								}}
+								{{ dropzoneText }}
 							</p>
 							<p class="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-								Compatible with RTM raw JSON backups or OpenTask-aligned exports
+								{{ dropzoneSubtext }}
 							</p>
 						</div>
 					</div>

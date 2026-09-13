@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { createPinia, setActivePinia } from "pinia";
 
 mock.module("@tauri-apps/api/core", () => ({
@@ -8,7 +8,13 @@ mock.module("@tauri-apps/api/core", () => ({
 import type { List, Task } from "../src/models/index.ts";
 import { useListStore } from "../src/stores/lists.ts";
 import { useTaskStore } from "../src/stores/tasks.ts";
-import { copyToClipboard, formatTasksAsMarkdown } from "../src/utils/markdown.ts";
+import {
+	copyToClipboard,
+	escapeHtml,
+	formatTasksAsMarkdown,
+	renderMarkdown,
+	sanitizeUrl,
+} from "../src/utils/markdown.ts";
 function makeTask(overrides: Partial<Task> = {}): Task {
 	return {
 		id: overrides.id ?? `task-${Math.random().toString(36).slice(2, 8)}`,
@@ -264,10 +270,15 @@ describe("copyToClipboard", () => {
 			},
 		};
 
-		const success = await copyToClipboard("fallback text");
-		expect(success).toBe(true);
-		expect(commandCalled).toBe("copy");
-		expect(capturedValue).toBe("fallback text");
+		const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const success = await copyToClipboard("fallback text");
+			expect(success).toBe(true);
+			expect(commandCalled).toBe("copy");
+			expect(capturedValue).toBe("fallback text");
+		} finally {
+			warnSpy.mockRestore();
+		}
 	});
 });
 
@@ -320,5 +331,121 @@ describe("Store integration: copying a particular list vs copying a view", () =>
 		});
 
 		expect(markdown).toBe("## Inbox\n- [ ] task 1\n- [ ] task 2\n\n## Work\n- [x] task 3");
+	});
+});
+
+describe("escapeHtml", () => {
+	test("escapes ampersands, angle brackets, and quotes", () => {
+		expect(escapeHtml("a & b < c > d \"e\" 'f'")).toBe(
+			"a &amp; b &lt; c &gt; d &quot;e&quot; &#39;f&#39;",
+		);
+	});
+});
+
+describe("sanitizeUrl", () => {
+	test("allows valid http, https, and mailto URLs", () => {
+		expect(sanitizeUrl("https://example.com/path?q=1")).toBe("https://example.com/path?q=1");
+		expect(sanitizeUrl("http://localhost:3000")).toBe("http://localhost:3000");
+		expect(sanitizeUrl("mailto:test@example.com")).toBe("mailto:test@example.com");
+	});
+
+	test("rejects unsafe or malformed URLs", () => {
+		expect(sanitizeUrl("javascript:alert(1)")).toBeNull();
+		expect(sanitizeUrl("data:text/html,evil")).toBeNull();
+		expect(sanitizeUrl("https://example.com with spaces")).toBeNull();
+		expect(sanitizeUrl("   ")).toBeNull();
+	});
+});
+
+describe("renderMarkdown", () => {
+	test("returns empty string for empty or whitespace content", () => {
+		expect(renderMarkdown("")).toBe("");
+		expect(renderMarkdown("   \n\t  ")).toBe("");
+	});
+
+	test("escapes HTML to prevent script and tag injection", () => {
+		const result = renderMarkdown("<script>alert('xss')</script> & <b>bold</b>");
+		expect(result).not.toContain("<script>");
+		expect(result).toContain("&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;");
+		expect(result).toContain("&amp;");
+	});
+
+	test("renders headings h1, h2, h3, h4 without trailing br", () => {
+		const result = renderMarkdown("# Heading 1\n## Heading 2\n### Heading 3\n#### Heading 4");
+		expect(result).toContain(
+			'<h2 class="font-extrabold text-lg mt-3 mb-1.5 text-zinc-900 dark:text-zinc-100">Heading 1</h2>',
+		);
+		expect(result).toContain(
+			'<h3 class="font-bold text-base mt-2 mb-1 text-zinc-900 dark:text-zinc-100">Heading 2</h3>',
+		);
+		expect(result).toContain(
+			'<h4 class="font-bold text-sm mt-2 mb-1 text-zinc-900 dark:text-zinc-100">Heading 3</h4>',
+		);
+		expect(result).toContain(
+			'<h5 class="font-bold text-xs mt-1.5 mb-1 text-zinc-900 dark:text-zinc-100">Heading 4</h5>',
+		);
+		expect(result).not.toContain("<br />");
+	});
+
+	test("wraps list items properly in ul and ol containers", () => {
+		const ulResult = renderMarkdown("- Item 1\n- Item 2\n- Item 3");
+		expect(ulResult).toBe(
+			'<ul class="list-disc ml-5 my-1.5 space-y-0.5"><li class="text-sm">Item 1</li><li class="text-sm">Item 2</li><li class="text-sm">Item 3</li></ul>',
+		);
+
+		const olResult = renderMarkdown("1. First\n2. Second");
+		expect(olResult).toBe(
+			'<ol class="list-decimal ml-5 my-1.5 space-y-0.5"><li class="text-sm">First</li><li class="text-sm">Second</li></ol>',
+		);
+	});
+
+	test("renders checklists with checkboxes in ul container", () => {
+		const result = renderMarkdown("- [ ] Unchecked\n- [x] Checked");
+		expect(result).toContain('<ul class="list-disc ml-5 my-1.5 space-y-0.5">');
+		expect(result).toContain('type="checkbox"');
+		expect(result).toContain("checked");
+		expect(result).toContain("Unchecked");
+		expect(result).toContain("Checked");
+	});
+
+	test("sanitizes links: allows safe http/https/mailto, neutralizes javascript", () => {
+		const safeResult = renderMarkdown(
+			"[Safe](https://example.com) and [Email](mailto:user@example.com)",
+		);
+		expect(safeResult).toContain(
+			'<a href="https://example.com" target="_blank" rel="noopener noreferrer"',
+		);
+		expect(safeResult).toContain(
+			'<a href="mailto:user@example.com" target="_blank" rel="noopener noreferrer"',
+		);
+
+		const unsafeResult = renderMarkdown("[Unsafe](javascript:alert(1))");
+		expect(unsafeResult).not.toContain('href="javascript:');
+		expect(unsafeResult).not.toContain("<a");
+		expect(unsafeResult).toContain("Unsafe");
+	});
+
+	test("formats inline code, bold, italic, and strikethrough", () => {
+		const result = renderMarkdown("`code` and **bold** and *italic* and ~~deleted~~");
+		expect(result).toContain(
+			'<code class="px-1 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 text-xs font-mono text-zinc-800 dark:text-zinc-200">code</code>',
+		);
+		expect(result).toContain("<strong>bold</strong>");
+		expect(result).toContain("<em>italic</em>");
+		expect(result).toContain("<del>deleted</del>");
+	});
+
+	test("renders code blocks in pre/code without trailing br", () => {
+		const result = renderMarkdown("```\nconst x = 1;\nconst y = 2;\n```");
+		expect(result).toBe(
+			'<pre class="bg-zinc-100 dark:bg-zinc-900 p-2 rounded text-xs font-mono overflow-x-auto my-2 border border-zinc-200 dark:border-zinc-800"><code>const x = 1;\nconst y = 2;</code></pre>',
+		);
+	});
+
+	test("renders blockquotes with italic style", () => {
+		const result = renderMarkdown("> Quote line 1\n> Quote line 2");
+		expect(result).toBe(
+			'<blockquote class="border-l-2 border-zinc-300 dark:border-zinc-700 pl-3 my-1.5 italic text-zinc-600 dark:text-zinc-400">Quote line 1<br />Quote line 2</blockquote>',
+		);
 	});
 });

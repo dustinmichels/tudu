@@ -40,6 +40,7 @@ import { useListStore } from "../stores/lists.ts";
 import { useTagStore } from "../stores/tags.ts";
 import { isOverdue, useTaskStore } from "../stores/tasks.ts";
 import { useUIStore } from "../stores/ui.ts";
+import { renderMarkdown } from "../utils/markdown.ts";
 
 const listStore = useListStore();
 const taskStore = useTaskStore();
@@ -145,6 +146,7 @@ watch(
 	(updatedStoreTask) => {
 		if (updatedStoreTask && detailData.value && updatedStoreTask.id === detailData.value.id) {
 			detailData.value.title = updatedStoreTask.title;
+			detailData.value.description = updatedStoreTask.description;
 			detailData.value.completed = updatedStoreTask.completed;
 			detailData.value.completed_at = updatedStoreTask.completed_at;
 			detailData.value.due = updatedStoreTask.due;
@@ -452,6 +454,37 @@ async function handleLocationBlur() {
 	}
 }
 
+// Description
+function handleDescriptionInput(e: Event) {
+	if (!task.value) return;
+	const val = (e.target as HTMLTextAreaElement).value;
+	const nextVal = val.trim() === "" ? null : val;
+	if (nextVal === task.value.description) return;
+	if (detailData.value) {
+		detailData.value.description = nextVal;
+	}
+	taskStore
+		.updateTask(
+			{
+				id: task.value.id,
+				description: nextVal,
+			},
+			{ debounceMs: 400 },
+		)
+		.catch((err) => {
+			console.error("Failed to debounced-update description:", err);
+		});
+}
+
+async function handleDescriptionBlur() {
+	if (!task.value) return;
+	try {
+		await taskStore.flushDebouncedUpdate(task.value.id);
+	} catch (err) {
+		console.error("Failed to flush debounced description:", err);
+	}
+}
+
 // URL
 function handleUrlInput(e: Event) {
 	if (!task.value) return;
@@ -621,70 +654,6 @@ function inspectSubtask(subtaskItem: Task) {
 
 const notes = computed<Note[]>(() => detailData.value?.notes ?? []);
 
-function sanitizeUrl(rawUrl: string): string | null {
-	const trimmed = rawUrl.trim();
-	if (/^https?:\/\//i.test(trimmed) || /^mailto:/i.test(trimmed)) {
-		return trimmed;
-	}
-	return null;
-}
-
-function renderMarkdown(content: string): string {
-	if (!content) return "";
-	// 1. Fully escape raw HTML characters (prevent tag and attribute injection)
-	let html = content
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;")
-		.replace(/'/g, "&#39;");
-
-	// 2. Headings
-	html = html.replace(
-		/^### (.*$)/gim,
-		'<h4 class="font-bold text-sm mt-2 mb-1 text-zinc-900 dark:text-zinc-100">$1</h4>',
-	);
-	html = html.replace(
-		/^## (.*$)/gim,
-		'<h3 class="font-bold text-base mt-2 mb-1 text-zinc-900 dark:text-zinc-100">$1</h3>',
-	);
-	html = html.replace(
-		/^# (.*$)/gim,
-		'<h2 class="font-extrabold text-lg mt-3 mb-1.5 text-zinc-900 dark:text-zinc-100">$1</h2>',
-	);
-
-	// 3. Bold, italic, strike
-	html = html.replace(/\*\*\*(.*?)\*\*\*/g, "<strong><em>$1</em></strong>");
-	html = html.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
-	html = html.replace(/\*(.*?)\*/g, "<em>$1</em>");
-	html = html.replace(/~~(.*?)~~/g, "<del>$1</del>");
-
-	// 4. Inline code
-	html = html.replace(
-		/`([^`]+)`/g,
-		'<code class="px-1 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 text-xs font-mono text-zinc-800 dark:text-zinc-200">$1</code>',
-	);
-
-	// 5. Safe links: validate protocol (strictly https?:// or mailto:) and attribute-encode
-	html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, linkText, linkTarget) => {
-		const safeTarget = sanitizeUrl(linkTarget);
-		if (!safeTarget) {
-			return linkText;
-		}
-		const encodedTarget = safeTarget.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-		return `<a href="${encodedTarget}" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-400 underline hover:text-blue-700">${linkText}</a>`;
-	});
-
-	// 6. Lists
-	html = html.replace(/^\s*-\s+(.*$)/gim, '<li class="ml-4 list-disc text-sm">$1</li>');
-	html = html.replace(/^\s*\*\s+(.*$)/gim, '<li class="ml-4 list-disc text-sm">$1</li>');
-
-	// 7. Line breaks
-	html = html.replace(/\n/g, "<br />");
-
-	return html;
-}
-
 async function handleAddNote() {
 	if (!task.value) return;
 	const content = newNoteContent.value.trim();
@@ -833,6 +802,7 @@ function formatDate(dateStr: string | null | undefined): string {
 					@click="handleClose"
 					class="p-1 rounded-md text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
 					title="Close details"
+					aria-label="Close details"
 				>
 					<X class="w-4 h-4" />
 				</button>
@@ -882,9 +852,22 @@ function formatDate(dateStr: string | null | undefined): string {
 								type="button"
 								class="opacity-0 group-hover:opacity-100 p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-opacity"
 								title="Edit title"
+								aria-label="Edit title"
 							>
 								<Pencil class="w-3.5 h-3.5" />
 							</button>
+						</div>
+
+						<!-- Task Description -->
+						<div class="mt-2">
+							<textarea
+								:value="task.description || ''"
+								@input="handleDescriptionInput"
+								@blur="handleDescriptionBlur"
+								placeholder="Add description..."
+								rows="2"
+								class="w-full text-xs bg-transparent border border-transparent hover:border-zinc-200 dark:hover:border-zinc-800 focus:border-zinc-300 dark:focus:border-zinc-700 rounded p-1.5 text-zinc-600 dark:text-zinc-400 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 focus:outline-hidden focus:bg-white dark:focus:bg-zinc-900 transition-colors resize-y min-h-[48px]"
+							></textarea>
 						</div>
 					</div>
 				</div>
@@ -1113,6 +1096,7 @@ function formatDate(dateStr: string | null | undefined): string {
 									@click="handleRemoveTag(t.id)"
 									class="hover:text-red-500 cursor-pointer"
 									title="Remove tag"
+									:aria-label="`Remove tag ${t.name}`"
 								>
 									<X class="w-3 h-3" />
 								</button>
@@ -1179,6 +1163,7 @@ function formatDate(dateStr: string | null | undefined): string {
 								@click="openUrl(task.url)"
 								class="p-1 text-zinc-500 hover:text-blue-500 cursor-pointer"
 								title="Open link"
+								aria-label="Open link"
 							>
 								<ExternalLink class="w-3.5 h-3.5" />
 							</button>
@@ -1244,6 +1229,7 @@ function formatDate(dateStr: string | null | undefined): string {
 							:disabled="!newSubtaskTitle.trim() || isAddingSubtask"
 							class="p-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white rounded cursor-pointer transition-colors"
 							title="Add subtask"
+							aria-label="Add subtask"
 						>
 							<Plus class="w-3.5 h-3.5" />
 						</button>
@@ -1279,6 +1265,7 @@ function formatDate(dateStr: string | null | undefined): string {
 								@click="inspectSubtask(st)"
 								class="p-1 rounded text-zinc-400 group-hover:text-zinc-700 dark:group-hover:text-zinc-200 hover:bg-zinc-300/60 dark:hover:bg-zinc-700/60 transition-colors cursor-pointer"
 								title="Inspect subtask details"
+								:aria-label="`Inspect subtask ${st.title}`"
 							>
 								<ChevronRight class="w-3.5 h-3.5" />
 							</button>
@@ -1374,6 +1361,7 @@ function formatDate(dateStr: string | null | undefined): string {
 											@click="handleSaveNote(note.id)"
 											class="p-1 text-emerald-600 hover:text-emerald-700 cursor-pointer"
 											title="Save note"
+											aria-label="Save note"
 										>
 											<Check class="w-3.5 h-3.5" />
 										</button>
@@ -1382,6 +1370,7 @@ function formatDate(dateStr: string | null | undefined): string {
 											@click="cancelEditNote"
 											class="p-1 text-zinc-400 hover:text-zinc-600 cursor-pointer"
 											title="Cancel"
+											aria-label="Cancel editing note"
 										>
 											<X class="w-3.5 h-3.5" />
 										</button>
@@ -1438,6 +1427,7 @@ function formatDate(dateStr: string | null | undefined): string {
 											@click="startEditNote(note)"
 											class="p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 cursor-pointer"
 											title="Edit note"
+											aria-label="Edit note"
 										>
 											<Pencil class="w-3 h-3" />
 										</button>
@@ -1446,12 +1436,12 @@ function formatDate(dateStr: string | null | undefined): string {
 											@click="handleDeleteNote(note.id)"
 											class="p-1 text-zinc-400 hover:text-red-500 cursor-pointer"
 											title="Delete note"
+											aria-label="Delete note"
 										>
 											<Trash2 class="w-3 h-3" />
 										</button>
 									</div>
 								</div>
-
 								<div
 									class="text-xs text-zinc-700 dark:text-zinc-300 pt-1 break-words select-text"
 									v-html="renderMarkdown(note.content)"

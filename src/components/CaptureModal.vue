@@ -9,138 +9,59 @@ import {
 	Zap,
 } from "lucide-vue-next";
 import { nextTick, ref, watch } from "vue";
-import { assignTag } from "../services/api.ts";
-import { useFilterStore } from "../stores/filters.ts";
-import { useListStore } from "../stores/lists.ts";
-import { useTagStore } from "../stores/tags.ts";
-import { useTaskStore } from "../stores/tasks.ts";
+import { useSmartAddInput } from "../composables/useSmartAddInput.ts";
 import { useUIStore } from "../stores/ui.ts";
-import {
-	type ActiveSmartToken,
-	detectSmartToken,
-	getDueSuggestions,
-	getPrioritySuggestions,
-	getTagAndListSuggestions,
-	parseSmartAdd,
-	type SmartSuggestion,
-} from "../utils/smartAdd.ts";
+import { useTaskStore } from "../stores/tasks.ts";
 
 const uiStore = useUIStore();
-const listStore = useListStore();
 const taskStore = useTaskStore();
-const tagStore = useTagStore();
-const filterStore = useFilterStore();
 
+const modalCardRef = ref<HTMLElement | null>(null);
 const inputRef = ref<HTMLInputElement | null>(null);
-const title = ref("");
-const isAdding = ref(false);
-
-// Smart add state
-const activeSmartToken = ref<ActiveSmartToken | null>(null);
-const smartSuggestions = ref<SmartSuggestion[]>([]);
-const selectedSmartIndex = ref(0);
-const isSmartMenuOpen = ref(false);
+let previouslyFocusedElement: HTMLElement | null = null;
 
 function close() {
 	uiStore.toggleCapture(false);
 }
 
-function reset() {
-	title.value = "";
-	isSmartMenuOpen.value = false;
-	activeSmartToken.value = null;
-	smartSuggestions.value = [];
-	selectedSmartIndex.value = 0;
-}
+const {
+	inputText: title,
+	isAdding,
+	activeSmartToken,
+	smartSuggestions,
+	selectedSmartIndex,
+	isSmartMenuOpen,
+	reset,
+	updateSmartDropdown,
+	selectSmartSuggestion,
+	handleKeydown,
+	appendSmartPrefix,
+	submitTask: handleSubmit,
+	getPriorityFlagClass,
+} = useSmartAddInput({
+	inputRef,
+	onEscape: close,
+	onSuccess: () => {
+		close();
+	},
+});
 
 watch(
 	() => uiStore.isCaptureOpen,
 	async (open) => {
 		if (open) {
+			previouslyFocusedElement = document.activeElement as HTMLElement | null;
 			reset();
 			await nextTick();
 			inputRef.value?.focus();
+		} else if (previouslyFocusedElement && typeof previouslyFocusedElement.focus === "function") {
+			previouslyFocusedElement.focus();
+			previouslyFocusedElement = null;
 		}
 	},
 );
 
-function updateSmartDropdown() {
-	const input = inputRef.value;
-	if (!input) {
-		isSmartMenuOpen.value = false;
-		return;
-	}
-	const cursorPos = input.selectionStart ?? title.value.length;
-	const token = detectSmartToken(title.value, cursorPos);
-	if (!token) {
-		isSmartMenuOpen.value = false;
-		activeSmartToken.value = null;
-		smartSuggestions.value = [];
-		return;
-	}
-
-	activeSmartToken.value = token;
-	if (token.prefix === "#") {
-		const tagNames = tagStore.tagsWithCounts.map((t) => t.name);
-		const listNames = listStore.lists.map((l) => l.name);
-		smartSuggestions.value = getTagAndListSuggestions(tagNames, listNames, token.query);
-	} else if (token.prefix === "^") {
-		smartSuggestions.value = getDueSuggestions(token.query);
-	} else if (token.prefix === "!") {
-		smartSuggestions.value = getPrioritySuggestions(token.query);
-	}
-
-	isSmartMenuOpen.value = smartSuggestions.value.length > 0;
-	selectedSmartIndex.value = 0;
-}
-
-function selectSmartSuggestion(suggestion: SmartSuggestion) {
-	const token = activeSmartToken.value;
-	if (!token || !inputRef.value) return;
-
-	const current = title.value;
-	const before = current.slice(0, token.startIndex);
-	const after = current.slice(token.endIndex);
-	const replacement = `${token.prefix}${suggestion.insertValue} `;
-	title.value = before + replacement + after;
-
-	isSmartMenuOpen.value = false;
-	activeSmartToken.value = null;
-	smartSuggestions.value = [];
-
-	nextTick(() => {
-		const input = inputRef.value;
-		if (!input) return;
-		input.focus();
-		const newCursor = before.length + replacement.length;
-		input.setSelectionRange(newCursor, newCursor);
-	});
-}
-
-function handleKeydown(e: KeyboardEvent) {
-	if (isSmartMenuOpen.value && smartSuggestions.value.length > 0) {
-		if (e.key === "ArrowDown") {
-			e.preventDefault();
-			selectedSmartIndex.value = (selectedSmartIndex.value + 1) % smartSuggestions.value.length;
-			return;
-		}
-		if (e.key === "ArrowUp") {
-			e.preventDefault();
-			selectedSmartIndex.value =
-				(selectedSmartIndex.value - 1 + smartSuggestions.value.length) %
-				smartSuggestions.value.length;
-			return;
-		}
-		if (e.key === "Enter" || e.key === "Tab") {
-			const item = smartSuggestions.value[selectedSmartIndex.value];
-			if (item) {
-				e.preventDefault();
-				selectSmartSuggestion(item);
-			}
-			return;
-		}
-	}
-
+function handleKeyDownTrap(e: KeyboardEvent) {
 	if (e.key === "Escape") {
 		e.preventDefault();
 		if (isSmartMenuOpen.value) {
@@ -148,112 +69,42 @@ function handleKeydown(e: KeyboardEvent) {
 		} else {
 			close();
 		}
-	}
-}
-
-function appendSmartPrefix(prefix: string) {
-	const input = inputRef.value;
-	const current = title.value;
-	const needsSpace = current.length > 0 && !current.endsWith(" ");
-	title.value = `${current}${needsSpace ? " " : ""}${prefix}`;
-	nextTick(() => {
-		if (!input) return;
-		input.focus();
-		updateSmartDropdown();
-	});
-}
-
-function getTodayDateStr(): string {
-	const d = new Date();
-	const y = d.getFullYear();
-	const m = String(d.getMonth() + 1).padStart(2, "0");
-	const day = String(d.getDate()).padStart(2, "0");
-	return `${y}-${m}-${day}`;
-}
-
-function getTomorrowDateStr(): string {
-	const d = new Date();
-	d.setDate(d.getDate() + 1);
-	const y = d.getFullYear();
-	const m = String(d.getMonth() + 1).padStart(2, "0");
-	const day = String(d.getDate()).padStart(2, "0");
-	return `${y}-${m}-${day}`;
-}
-
-function getYesterdayDateStr(): string {
-	const d = new Date();
-	d.setDate(d.getDate() - 1);
-	const y = d.getFullYear();
-	const m = String(d.getMonth() + 1).padStart(2, "0");
-	const day = String(d.getDate()).padStart(2, "0");
-	return `${y}-${m}-${day}`;
-}
-
-async function handleSubmit() {
-	const rawInput = title.value.trim();
-	if (!rawInput) return;
-
-	isSmartMenuOpen.value = false;
-	const knownListNames = listStore.lists.map((l) => l.name);
-	const parsed = parseSmartAdd(rawInput, knownListNames);
-	const taskTitle = parsed.title || rawInput;
-
-	let due: string | null = parsed.due ?? null;
-	if (!due) {
-		if (listStore.activeView === "today") due = getTodayDateStr();
-		else if (listStore.activeView === "tomorrow") due = getTomorrowDateStr();
-		else if (listStore.activeView === "this_week") due = getTodayDateStr();
-		else if (listStore.activeView === "overdue") due = getYesterdayDateStr();
+		return;
 	}
 
-	let targetListId: string | undefined;
-	if (parsed.listName) {
-		const matched = listStore.lists.find(
-			(l) => l.name.toLowerCase() === parsed.listName?.toLowerCase(),
-		);
-		if (matched) targetListId = matched.id;
+	if (e.key !== "Tab") return;
+
+	if (isSmartMenuOpen.value && smartSuggestions.value.length > 0) {
+		return;
 	}
-	if (!targetListId) {
-		targetListId = listStore.activeList?.id ?? listStore.inboxList?.id ?? listStore.lists[0]?.id;
+
+	const container = modalCardRef.value;
+	if (!container) return;
+
+	const focusable = Array.from(
+		container.querySelectorAll<HTMLElement>(
+			'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+		),
+	).filter((el) => el.offsetParent !== null || el.offsetWidth > 0 || el.offsetHeight > 0);
+
+	if (focusable.length === 0) {
+		e.preventDefault();
+		return;
 	}
-	if (!targetListId) return;
 
-	try {
-		isAdding.value = true;
-		const created = await taskStore.addTask({
-			title: taskTitle,
-			list_id: targetListId,
-			due,
-			priority: parsed.priority ?? null,
-		});
-
-		const tagsToAssign = new Set<string>();
-		if (filterStore.selectedTag) tagsToAssign.add(filterStore.selectedTag);
-		for (const tag of parsed.tags) tagsToAssign.add(tag);
-
-		if (tagsToAssign.size > 0) {
-			for (const tag of tagsToAssign) {
-				try {
-					const trimmed = tag.trim().replace(/^#/, "");
-					if (!trimmed) continue;
-					const existing = tagStore.tags.find(
-						(t) => t.name.toLowerCase() === trimmed.toLowerCase() || t.id === trimmed,
-					);
-					const tagObj = existing ?? (await tagStore.createTag(trimmed));
-					await assignTag(created.id, tagObj.id);
-				} catch (tagErr) {
-					console.error(`Failed to assign tag ${tag}:`, tagErr);
-				}
-			}
-			await taskStore.fetchAllTasks();
-			await tagStore.fetchTags();
+	const first = focusable[0];
+	const last = focusable[focusable.length - 1];
+	if (!first || !last) return;
+	if (e.shiftKey) {
+		if (document.activeElement === first || !container.contains(document.activeElement)) {
+			last.focus();
+			e.preventDefault();
 		}
-
-		close();
-	} catch (err) {
-		console.error("Failed to add task from capture modal:", err);
-	} finally {
-		isAdding.value = false;
+	} else {
+		if (document.activeElement === last || !container.contains(document.activeElement)) {
+			first.focus();
+			e.preventDefault();
+		}
 	}
 }
 
@@ -275,7 +126,11 @@ function handleBackdropClick(e: MouseEvent) {
 			<div
 				v-if="uiStore.isCaptureOpen"
 				class="fixed inset-0 z-50 flex items-start justify-center pt-[15vh] px-4 bg-black/50 backdrop-blur-sm"
+				role="dialog"
+				aria-modal="true"
+				aria-labelledby="capture-modal-title"
 				@click="handleBackdropClick"
+				@keydown="handleKeyDownTrap"
 			>
 				<Transition
 					enter-active-class="transition-all duration-150 ease-out"
@@ -287,6 +142,7 @@ function handleBackdropClick(e: MouseEvent) {
 				>
 					<div
 						v-if="uiStore.isCaptureOpen"
+						ref="modalCardRef"
 						class="w-full max-w-xl bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl border border-zinc-200 dark:border-zinc-800 overflow-visible relative"
 					>
 						<!-- Modal header -->
@@ -298,7 +154,10 @@ function handleBackdropClick(e: MouseEvent) {
 							>
 								<Zap class="w-6 h-6 text-emerald-500" />
 							</div>
-							<h2 class="text-lg font-bold text-zinc-800 dark:text-zinc-100 mb-0.5 tracking-tight">
+							<h2
+								id="capture-modal-title"
+								class="text-lg font-bold text-zinc-800 dark:text-zinc-100 mb-0.5 tracking-tight"
+							>
 								Quick Capture
 							</h2>
 							<p class="text-xs text-zinc-400 dark:text-zinc-500 mb-3">
@@ -327,6 +186,7 @@ function handleBackdropClick(e: MouseEvent) {
 								@click="close"
 								class="absolute top-3 right-3 p-1 rounded-md text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
 								title="Close (Esc)"
+								aria-label="Close dialog"
 							>
 								<X class="w-4 h-4" />
 							</button>
@@ -351,6 +211,7 @@ function handleBackdropClick(e: MouseEvent) {
 									:disabled="isAdding || !title.trim()"
 									class="absolute right-3 p-1 text-zinc-400 hover:text-emerald-600 disabled:opacity-30 disabled:hover:text-zinc-400 transition-colors cursor-pointer"
 									title="Add task"
+									aria-label="Add task"
 								>
 									<CornerDownLeft class="w-4 h-4" />
 								</button>
@@ -399,16 +260,7 @@ function handleBackdropClick(e: MouseEvent) {
 											/>
 											<Flag
 												v-else-if="item.type === 'priority'"
-												:class="[
-													'w-3.5 h-3.5 shrink-0',
-													item.insertValue === '1'
-														? 'text-red-500'
-														: item.insertValue === '2'
-															? 'text-amber-500'
-															: item.insertValue === '3'
-																? 'text-blue-500'
-																: 'text-zinc-400',
-												]"
+												:class="['w-3.5 h-3.5 shrink-0', getPriorityFlagClass(item.insertValue)]"
 											/>
 											<span class="truncate">{{ item.label }}</span>
 											<span v-if="item.description" class="text-[10px] text-zinc-400 truncate">{{

@@ -146,6 +146,10 @@ export async function batchUpdateTasks(input: BatchUpdateTasksInput): Promise<Ta
 	return safeInvoke<Task[]>("batch_update_tasks", { input });
 }
 
+export async function batchDeleteTasks(ids: string[]): Promise<void> {
+	return safeInvoke<void>("batch_delete_tasks", { ids });
+}
+
 // ---------------------------------------------------------------------------
 // Tags & Notes API
 // ---------------------------------------------------------------------------
@@ -182,6 +186,14 @@ export async function assignTag(taskId: string, tagId: string): Promise<void> {
 
 export async function removeTag(taskId: string, tagId: string): Promise<void> {
 	return safeInvoke<void>("remove_tag", { taskId, tagId });
+}
+
+export async function batchAssignTag(taskIds: string[], tagId: string): Promise<void> {
+	return safeInvoke<void>("batch_assign_tag", { taskIds, tagId });
+}
+
+export async function batchRemoveTag(taskIds: string[], tagId: string): Promise<void> {
+	return safeInvoke<void>("batch_remove_tag", { taskIds, tagId });
 }
 
 export async function getNotes(taskId: string): Promise<Note[]> {
@@ -258,6 +270,7 @@ export const api = {
 		delete: deleteTask,
 		toggleComplete: toggleTaskComplete,
 		batchUpdate: batchUpdateTasks,
+		batchDelete: batchDeleteTasks,
 	},
 	tags: {
 		getAll: getTags,
@@ -265,6 +278,8 @@ export const api = {
 		create: createTag,
 		assign: assignTag,
 		remove: removeTag,
+		batchAssign: batchAssignTag,
+		batchRemove: batchRemoveTag,
 	},
 	notes: {
 		getByTaskId: getNotes,

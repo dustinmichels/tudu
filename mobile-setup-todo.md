@@ -34,21 +34,21 @@ This plan implements **Target-Specific Frontends in One Tauri Project**:
 
 ## Phase 2: Vite Configuration for Multi-Page Builds
 
-- [ ] **2.1 Configure multi-page Rollup input in `vite.config.ts`**
-  - [ ] Add `rollupOptions.input` with entries:
+- [x] **2.1 Configure multi-page Rollup input in `vite.config.ts`**
+  - [x] Add `rollupOptions.input` with entries:
     - `desktop: resolve(__dirname, "index.html")`
     - `mobile: resolve(__dirname, "mobile.html")`
-- [ ] **2.2 Verify Vite dev & build**
-  - [ ] Run `bun run dev` and confirm both `http://localhost:1420/` and `http://localhost:1420/mobile.html` load
-  - [ ] Run `bun run build` and verify that `dist/index.html` and `dist/mobile.html` are generated without TypeScript or bundling errors
+- [x] **2.2 Verify Vite dev & build**
+  - [x] Run `bun run dev` and confirm both `http://localhost:1420/` and `http://localhost:1420/mobile.html` load
+  - [x] Run `bun run build` and verify that `dist/index.html` and `dist/mobile.html` are generated without TypeScript or bundling errors
 
 ---
 
 ## Phase 3: Tauri Configuration & Scripts
 
-- [ ] **3.1 Set up Tauri mobile configuration overlay**
-  - [ ] Keep `src-tauri/tauri.conf.json` configured for desktop (`dist/index.html` / `http://localhost:1420`)
-  - [ ] Create `src-tauri/tauri.mobile.conf.json`:
+- [x] **3.1 Set up Tauri mobile configuration overlay**
+  - [x] Keep `src-tauri/tauri.conf.json` configured for desktop (`dist/index.html` / `http://localhost:1420`)
+  - [x] Create `src-tauri/tauri.mobile.conf.json`:
     - Set `build.devUrl` to `http://localhost:1420/mobile.html`
     - Set `build.frontendDist` to `../dist`
     - Configure mobile window/display settings
@@ -57,13 +57,13 @@ This plan implements **Target-Specific Frontends in One Tauri Project**:
   - [ ] Inspect `src-tauri/capabilities/`
   - [ ] Ensure capabilities needed on desktop (e.g. window management, shortcuts) and mobile (e.g. notifications, deep links) are properly scoped
 
-- [ ] **3.3 Update `package.json` scripts**
-  - [ ] Add `"dev:desktop": "tauri dev"`
-  - [ ] Add `"dev:mobile:android": "tauri android dev -c ./tauri.mobile.conf.json"`
-  - [ ] Add `"dev:mobile:ios": "tauri ios dev -c ./tauri.mobile.conf.json"`
-  - [ ] Add `"build:desktop": "tauri build"`
-  - [ ] Add `"build:android": "tauri android build -c ./tauri.mobile.conf.json"`
-  - [ ] Add `"build:ios": "tauri ios build -c ./tauri.mobile.conf.json"`
+- [x] **3.3 Update `package.json` scripts**
+  - [x] Add `"dev:desktop": "tauri dev"`
+  - [x] Add `"dev:mobile:android": "tauri android dev -c ./src-tauri/tauri.mobile.conf.json"`
+  - [x] Add `"dev:mobile:ios": "tauri ios dev -c ./src-tauri/tauri.mobile.conf.json"`
+  - [x] Add `"build:desktop": "tauri build"`
+  - [x] Add `"build:android": "tauri android build -c ./src-tauri/tauri.mobile.conf.json"`
+  - [x] Add `"build:ios": "tauri ios build -c ./src-tauri/tauri.mobile.conf.json"`
 
 ---
 
@@ -98,26 +98,26 @@ This plan implements **Target-Specific Frontends in One Tauri Project**:
 
 ## Phase 6: Mobile Layout & Shell
 
-- [ ] **6.1 Handle Mobile Viewport & Safe Areas**
-  - [ ] Add CSS utilities or Tailwind classes for `pt-[env(safe-area-inset-top)]` and `pb-[env(safe-area-inset-bottom)]`
-  - [ ] Add `overflow-hidden` and `touch-action` rules to prevent rubber-band bounce on app frame
+- [x] **6.1 Handle Mobile Viewport & Safe Areas**
+  - [x] Add CSS utilities or Tailwind classes for `pt-[env(safe-area-inset-top)]` and `pb-[env(safe-area-inset-bottom)]`
+  - [x] Add `overflow-hidden` and `touch-action` rules to prevent rubber-band bounce on app frame
 
-- [ ] **6.2 Build `MobileHeader.vue`**
-  - [ ] Compact touch header with active list/view title
-  - [ ] Filter / tag pill scroll row
-  - [ ] Sync status icon & offline badge
+- [x] **6.2 Build `MobileHeader`**
+  - [x] Compact touch header with active list/view title
+  - [x] Back button navigation between lists directory and list tasks
+  - [x] Sync status icon & offline badge
 
-- [ ] **6.3 Build `MobileNav.vue` (Bottom Tab Bar)**
-  - [ ] Create persistent bottom bar with icons:
-    - _Inbox_
-    - _Today_
+- [x] **6.3 Build `MobileNav` (Bottom Tab Bar)**
+  - [x] Create persistent bottom bar with icons:
+    - _Inbox_ (with task count badge)
+    - _Today_ (with task count badge)
     - _Lists_
-    - _Settings / Search_
-  - [ ] Add active tab styling and haptic/touch feedback styling
+    - _Settings_
+  - [x] Add active tab styling and touch feedback styling
 
-- [ ] **6.4 Add Floating Action Button (FAB)**
-  - [ ] Floating `+` button in lower right for quick task capture
-  - [ ] Connect FAB to `CaptureModal.vue`
+- [x] **6.4 Add Floating Action Button (FAB)**
+  - [x] Floating `+` button in lower right for quick task capture
+  - [x] Connect FAB to `CaptureModal.vue`
 
 ---
 

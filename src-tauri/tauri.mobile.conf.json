@@ -1,0 +1,15 @@
+{
+	"$schema": "https://schema.tauri.app/config/2",
+	"build": {
+		"devUrl": "http://localhost:1420/mobile.html",
+		"frontendDist": "../dist"
+	},
+	"app": {
+		"windows": [
+			{
+				"title": "TuDu",
+				"url": "mobile.html"
+			}
+		]
+	}
+}

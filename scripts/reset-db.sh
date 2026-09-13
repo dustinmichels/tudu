@@ -166,7 +166,26 @@ if [[ "$SKIP_MIGRATIONS" = true ]]; then
     echo ""
     echo -e "${YELLOW}--> Skipped migrations (--no-migrate).${RESET}"
     echo -e "    Tauri will initialize a fresh database when the app next launches."
-elif command -v sqlite3 >/dev/null 2>&1; then
+elif ! command -v sqlite3 >/dev/null 2>&1; then
+    echo ""
+    echo -e "${YELLOW}⚠️  Notice: 'sqlite3' CLI tool was not found in your PATH.${RESET}"
+    echo -e "   Database files have been wiped, but schema migrations cannot be applied directly via this script."
+    echo ""
+    echo -e "${BOLD}Installation options:${RESET}"
+    echo -e "  • macOS:            brew install sqlite"
+    echo -e "  • Ubuntu / Debian:  sudo apt-get install sqlite3"
+    echo -e "  • Fedora / RHEL:    sudo dnf install sqlite"
+    echo -e "  • Arch Linux:       sudo pacman -S sqlite"
+    echo -e "  • Windows:          winget install SQLite.SQLite (or choco install sqlite)"
+    echo ""
+    echo -e "${BOLD}Automatic Fallback:${RESET}"
+    echo -e "  TuDu's embedded Rust backend (libSQL/SQLite) automatically executes all pending migrations"
+    echo -e "  on startup. Run ${BOLD}bun run dev:desktop${RESET} to launch TuDu and initialize the database."
+    if [[ "$SEED_DATA" = true ]]; then
+        echo ""
+        echo -e "${YELLOW}   Note: Starter seed data (--seed) was skipped because sqlite3 is not available.${RESET}"
+    fi
+else
     echo ""
     echo -e "${BLUE}--> Applying migrations using sqlite3...${RESET}"
 
@@ -260,15 +279,26 @@ EOF
     fi
 
     # Verify tables
+    REQUIRED_TABLES=("_migrations" "lists" "tasks" "tags" "task_tags" "notes")
+    MISSING_TABLES=()
+    for req_table in "${REQUIRED_TABLES[@]}"; do
+        if ! sqlite3 "$TARGET_DB_PATH" "SELECT 1 FROM sqlite_master WHERE type='table' AND name='$req_table';" | grep -q 1; then
+            MISSING_TABLES+=("$req_table")
+        fi
+    done
+
+    if [[ ${#MISSING_TABLES[@]} -gt 0 ]]; then
+        echo ""
+        echo -e "${RED}❌ Migration verification failed! Missing expected table(s): ${MISSING_TABLES[*]}${RESET}" >&2
+        exit 1
+    fi
+
+    MIGRATIONS_COUNT=$(sqlite3 "$TARGET_DB_PATH" "SELECT count(*) FROM _migrations;")
     TABLES=$(sqlite3 "$TARGET_DB_PATH" "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name ASC;" | tr '\n' ' ')
     echo ""
-    echo -e "${GREEN}✓ Schema initialized successfully!${RESET}"
+    echo -e "${GREEN}✓ Schema initialized and verified successfully!${RESET}"
+    echo -e "  Verified migrations: ${BOLD}$MIGRATIONS_COUNT applied${RESET}"
     echo -e "  Tables: ${BOLD}$TABLES${RESET}"
-else
-    echo ""
-    echo -e "${YELLOW}--> sqlite3 CLI not found.${RESET}"
-    echo -e "    Database files wiped. Tauri will create and migrate the database on next app launch."
 fi
-
 echo ""
 echo -e "${BOLD}${GREEN}==> Database reset complete!${RESET} (${TARGET_DB_PATH})"

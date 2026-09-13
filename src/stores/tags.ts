@@ -30,8 +30,6 @@ export const useTagStore = defineStore("tags", () => {
 		}
 	}
 
-	const loadTags = fetchTags;
-
 	async function createTag(name: string, color?: string | null): Promise<TagWithCount> {
 		loading.value = true;
 		error.value = null;
@@ -155,7 +153,6 @@ export const useTagStore = defineStore("tags", () => {
 		error,
 		tagsWithCounts,
 		fetchTags,
-		loadTags,
 		createTag,
 	};
 });

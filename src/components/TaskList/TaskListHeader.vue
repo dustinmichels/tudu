@@ -7,12 +7,9 @@ import {
 	CalendarRange,
 	Check,
 	CheckSquare,
-	Copy,
 	Inbox,
-	ListFilter,
 	ListTree,
 	Menu,
-	PanelRight,
 	PanelRightClose,
 	Sunrise,
 	Tag as TagIcon,
@@ -31,11 +28,17 @@ import IconPickerPopover from "../IconPickerPopover.vue";
 
 export type SortFieldOption = "created_at" | "priority" | "due" | "list" | "tags";
 
-const props = defineProps<{
-	activeSortField: SortFieldOption | null;
-	activeSortOrder: SortOrder;
-	visibleTasks?: Task[];
-}>();
+const props = withDefaults(
+	defineProps<{
+		activeSortField?: SortFieldOption | null;
+		activeSortOrder?: SortOrder;
+		visibleTasks?: Task[];
+	}>(),
+	{
+		activeSortField: null,
+		activeSortOrder: "asc",
+	},
+);
 
 const emit = defineEmits<{
 	(e: "changeSort", field: SortFieldOption): void;
@@ -50,6 +53,24 @@ const activeList = computed(() => listStore.activeList);
 const hasActiveSelection = computed(
 	() => !!listStore.activeList || !!listStore.activeView || !!filterStore.selectedTag,
 );
+
+const currentSortField = computed(
+	() => props.activeSortField ?? (filterStore.sortBy as SortFieldOption),
+);
+const currentSortOrder = computed(() => props.activeSortOrder ?? filterStore.sortOrder);
+
+function handleSortClick(field: SortFieldOption) {
+	if (filterStore.sortBy === field) {
+		if (filterStore.sortOrder === "asc") {
+			filterStore.setSorting(field, "desc");
+		} else {
+			filterStore.setSorting("priority", "asc");
+		}
+	} else {
+		filterStore.setSorting(field, "asc");
+	}
+	emit("changeSort", field);
+}
 
 const viewTitle = computed(() => {
 	if (filterStore.selectedTag) return `#${filterStore.selectedTag}`;
@@ -124,6 +145,7 @@ onUnmounted(() => {
 				@click="uiStore.toggleSidebar()"
 				class="md:hidden p-1.5 -ml-1 rounded-md text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer shrink-0"
 				title="Toggle Navigation Sidebar"
+				aria-label="Toggle Navigation Sidebar"
 			>
 				<Menu class="w-5 h-5" />
 			</button>
@@ -169,6 +191,7 @@ onUnmounted(() => {
 						@click="openIconPickerForActiveList($event)"
 						class="p-1 -ml-1 rounded-md hover:bg-zinc-200/70 dark:hover:bg-zinc-800 transition-colors shrink-0 cursor-pointer"
 						title="Change list icon"
+						aria-label="Change list icon"
 					>
 						<component
 							:is="getListIcon(activeList.icon)"
@@ -201,10 +224,10 @@ onUnmounted(() => {
 						: 'border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300',
 				]"
 				:title="copied ? 'Copied list to clipboard!' : 'Copy list as Markdown'"
+				:aria-label="copied ? 'Copied list to clipboard!' : 'Copy list as Markdown'"
 				data-copy-list-button
 			>
 				<Check v-if="copied" class="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-				<Copy v-else class="w-3.5 h-3.5" />
 				<span class="hidden sm:inline">{{ copied ? "Copied!" : "Copy" }}</span>
 			</button>
 
@@ -222,8 +245,10 @@ onUnmounted(() => {
 				:title="
 					taskStore.includeCompleted ? 'Hide completed tasks (⌘H)' : 'Show completed tasks (⌘H)'
 				"
+				:aria-label="
+					taskStore.includeCompleted ? 'Hide completed tasks (⌘H)' : 'Show completed tasks (⌘H)'
+				"
 			>
-				<ListFilter class="w-3.5 h-3.5" />
 				<span class="hidden sm:inline">{{
 					taskStore.includeCompleted ? "Showing all" : "Active only"
 				}}</span>
@@ -245,6 +270,11 @@ onUnmounted(() => {
 						? 'Hide indented subtasks (show in detail view only) (⌘U)'
 						: 'Expand subtasks indented under tasks in main view (⌘U)'
 				"
+				:aria-label="
+					uiStore.showSubtasksInline
+						? 'Hide indented subtasks'
+						: 'Expand subtasks indented under tasks'
+				"
 				data-toggle-subtasks-button
 			>
 				<ListTree class="w-3.5 h-3.5" />
@@ -258,10 +288,10 @@ onUnmounted(() => {
 				type="button"
 				@click="uiStore.toggleDetail()"
 				:title="uiStore.isDetailOpen ? 'Collapse task details' : 'Expand task details'"
+				:aria-label="uiStore.isDetailOpen ? 'Collapse task details' : 'Expand task details'"
 				class="p-1 sm:p-1.5 rounded-md border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 transition-colors cursor-pointer"
 			>
 				<PanelRightClose v-if="uiStore.isDetailOpen" class="w-4 h-4" />
-				<PanelRight v-else class="w-4 h-4" />
 			</button>
 		</div>
 	</div>
@@ -284,21 +314,21 @@ onUnmounted(() => {
 				:key="opt.field"
 				v-show="!opt.listOnly || !listStore.activeListId"
 				type="button"
-				@click="emit('changeSort', opt.field)"
+				@click="handleSortClick(opt.field)"
 				:class="[
 					'flex items-center gap-0.5 px-2 py-0.5 rounded-full border transition-colors cursor-pointer select-none',
-					activeSortField === opt.field
+					currentSortField === opt.field
 						? 'border-indigo-400 bg-indigo-50 text-indigo-700 dark:border-indigo-500 dark:bg-indigo-950/60 dark:text-indigo-300'
 						: 'border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:border-zinc-300 dark:hover:border-zinc-600 hover:text-zinc-700 dark:hover:text-zinc-200',
 				]"
 			>
 				{{ opt.label }}
 				<ArrowUp
-					v-if="activeSortField === opt.field && activeSortOrder === 'asc'"
+					v-if="currentSortField === opt.field && currentSortOrder === 'asc'"
 					class="w-3 h-3"
 				/>
 				<ArrowDown
-					v-else-if="activeSortField === opt.field && activeSortOrder === 'desc'"
+					v-else-if="currentSortField === opt.field && currentSortOrder === 'desc'"
 					class="w-3 h-3"
 				/>
 			</button>
