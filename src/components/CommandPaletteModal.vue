@@ -52,7 +52,7 @@ watch(
 	() => uiStore.isCommandPaletteOpen,
 	async (isOpen) => {
 		if (isOpen) {
-			query.value = uiStore.commandPaletteInitialMode === "lists" ? "" : "";
+			query.value = "";
 			selectedIndex.value = 0;
 			await nextTick();
 			inputRef.value?.focus();

@@ -1,19 +1,22 @@
-I want to create a new, personal todo list app called TuDu, modeled after Remember The Milk (RTM).
+# TuDu Initial Concept & Vision (Archived)
 
-Some screenshots of RTM are attached in screenshots folder.
+> **Note**: This document captures the initial project concept and early requirements for TuDu.
+> - For up-to-date user documentation, architecture, and guides, see [README.md](README.md).
+> - For comprehensive data models, cross-system interoperability, and OpenTask JSON specifications, see [standard.md](standard.md).
 
-Key features:
+TuDu is a fast, personal task management app modeled after the core workflow and ergonomics of Remember The Milk (RTM).
 
-- Tasks can be organized by custom tags, lists, or due date.
-- If you click on a list you see complete and incomplete tasks.
-- If you click on a task you see detail view.
-  - Properties: due, repeats, list, tags, location, url, notes
-  - Subtasks: (which can have all the same properties)
+## Key Features
 
-Tasks also have a priority level. They can be marked as "done" or "posted by 1 day, 2 days, 1 week".
+- **Flexible Organization**: Organize tasks by custom tags, lists, priority levels, or due dates.
+- **List & Status Views**: Easily view and filter completed vs. incomplete tasks within each list.
+- **Detailed Task Inspector**:
+  - Properties: due date/time, recurrence rules, lists, tags, location, URL, and multi-note support.
+  - Hierarchical subtasks (recursively supporting the same properties).
+- **Prioritization & Actions**: Tasks support priority levels (P1, P2, P3) and quick postponement ("postpone by 1 day, 2 days, 1 week").
 
-## Implementation
+## Implementation & Architecture
 
-- Build the app using tauri, with a frontend made using bun, vue, typescript.
-- Focus on desktop app first (macbook) but be prepared to expand into mobile, android, etc.
-- Use turso for the database. Focus on local for now, but we will eventually need to sync computer and phone, eg with turso cloud free tier.
+- **Framework**: Built with [Tauri 2](https://tauri.app/) and a frontend powered by Bun, Vue 3, and TypeScript.
+- **Multi-Platform**: Designed for desktop (macOS) first, with an extensible architecture for mobile (iOS and Android).
+- **Local-First Database**: Powered locally by embedded libSQL / SQLite with support for remote synchronization via Turso.

@@ -532,8 +532,14 @@ pub async fn update_task_impl(conn: &Connection, task: UpdateTaskInput) -> Resul
         None => existing.color,
     };
     let position = task.position.unwrap_or(existing.position);
-    let freeform_x = task.freeform_x.or(existing.freeform_x);
-    let freeform_y = task.freeform_y.or(existing.freeform_y);
+    let freeform_x = match task.freeform_x {
+        Some(x) => x,
+        None => existing.freeform_x,
+    };
+    let freeform_y = match task.freeform_y {
+        Some(y) => y,
+        None => existing.freeform_y,
+    };
 
     let (geo_latitude, geo_longitude) = if let Some(geo_opt) = task.geo {
         match geo_opt {
@@ -975,6 +981,20 @@ mod tests {
             assert_eq!(updated.freeform_y, Some(296.0));
             assert_eq!(updated.geo_latitude, Some(40.7128));
             assert_eq!(updated.geo_longitude, Some(-74.0060));
+            // Clearing freeform_x and freeform_y by passing null
+            let clear_freeform_payload: UpdateTaskInput = serde_json::from_value(serde_json::json!({
+                "id": parent.id,
+                "freeform_x": null,
+                "freeform_y": null,
+            }))
+            .expect("deserialize clear freeform input");
+            let cleared = update_task_impl(&conn, clear_freeform_payload)
+                .await
+                .expect("update task clear freeform");
+            assert_eq!(cleared.freeform_x, None);
+            assert_eq!(cleared.freeform_y, None);
+            // Other fields should remain unchanged
+            assert_eq!(cleared.title, "Updated Parent Title");
 
             // Delete parent task -> subtask must also be soft-deleted
             delete_task_impl(&conn, parent.id.clone())

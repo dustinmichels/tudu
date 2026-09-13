@@ -1,6 +1,6 @@
 # TuDu
 
-A fast, keyboard-first, local-first personal task manager inspired by Remember The Milk (RTM), built with **Tauri 2**, **Vue 3**, and embedded **libSQL / SQLite**.
+A fast, keyboard-first, local-first personal task manager inspired, built with **Tauri 2**, **Vue 3**, and embedded **libSQL / SQLite**.
 
 ---
 

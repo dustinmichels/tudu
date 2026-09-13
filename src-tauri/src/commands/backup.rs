@@ -205,7 +205,23 @@ pub async fn export_backup_impl(conn: &Connection) -> Result<OpenTaskDocument, S
             created_at: Some(task.created_at),
             updated_at: Some(task.updated_at),
             deleted_at: task.deleted_at,
-            extra: task.extra,
+            extra: {
+                let mut extra_val = task.extra;
+                if task.freeform_x.is_some() || task.freeform_y.is_some() {
+                    let mut map = match extra_val {
+                        Some(serde_json::Value::Object(m)) => m,
+                        _ => serde_json::Map::new(),
+                    };
+                    if let Some(x) = task.freeform_x {
+                        map.insert("freeform_x".to_string(), serde_json::json!(x));
+                    }
+                    if let Some(y) = task.freeform_y {
+                        map.insert("freeform_y".to_string(), serde_json::json!(y));
+                    }
+                    extra_val = Some(serde_json::Value::Object(map));
+                }
+                extra_val
+            },
         });
     }
 
@@ -419,25 +435,40 @@ async fn import_backup_inner(
             }
         }
 
+        let freeform_x = task.extra.as_ref().and_then(|e| {
+            e.get("freeform_x")
+                .or_else(|| e.get("freeformX"))
+                .and_then(|v| v.as_f64())
+        });
+        let freeform_y = task.extra.as_ref().and_then(|e| {
+            e.get("freeform_y")
+                .or_else(|| e.get("freeformY"))
+                .and_then(|v| v.as_f64())
+        });
+
         let mut existing = conn
-            .query("SELECT id FROM tasks WHERE id = ?1", params![task_id.clone()])
+            .query("SELECT id, freeform_x, freeform_y FROM tasks WHERE id = ?1", params![task_id.clone()])
             .await
             .map_err(|e| format!("Failed to check existing task: {}", e))?;
 
-        if existing
+        if let Some(row) = existing
             .next()
             .await
             .map_err(|e| format!("Error checking task: {}", e))?
-            .is_some()
         {
+            let existing_x: Option<f64> = row.get(1).unwrap_or(None);
+            let existing_y: Option<f64> = row.get(2).unwrap_or(None);
+            let final_x = freeform_x.or(existing_x);
+            let final_y = freeform_y.or(existing_y);
+
             conn.execute(
                 "UPDATE tasks
                  SET uid = ?2, parent_id = ?3, list_id = ?4, title = ?5, description = ?6,
                      due = ?7, is_all_day = ?8, rrule = ?9, priority = ?10, location = ?11,
                      url = ?12, completed = ?13, completed_at = ?14, status = ?15, start = ?16,
                      duration = ?17, timezone = ?18, percent_complete = ?19, color = ?20,
-                     position = ?21, geo_latitude = ?22, geo_longitude = ?23, extra = ?24,
-                     updated_at = ?25, deleted_at = ?26
+                     position = ?21, freeform_x = ?22, freeform_y = ?23, geo_latitude = ?24,
+                     geo_longitude = ?25, extra = ?26, updated_at = ?27, deleted_at = ?28
                  WHERE id = ?1",
                 params![
                     task_id.clone(),
@@ -461,6 +492,8 @@ async fn import_backup_inner(
                     task.percent_complete,
                     task.color,
                     task.position,
+                    final_x,
+                    final_y,
                     geo_lat,
                     geo_lng,
                     extra_str,
@@ -472,8 +505,8 @@ async fn import_backup_inner(
             .map_err(|e| format!("Failed to update task: {}", e))?;
         } else {
             conn.execute(
-                "INSERT INTO tasks (id, uid, parent_id, list_id, title, description, due, is_all_day, rrule, priority, location, url, completed, completed_at, status, start, duration, timezone, percent_complete, color, position, geo_latitude, geo_longitude, extra, created_at, updated_at, deleted_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)",
+                "INSERT INTO tasks (id, uid, parent_id, list_id, title, description, due, is_all_day, rrule, priority, location, url, completed, completed_at, status, start, duration, timezone, percent_complete, color, position, freeform_x, freeform_y, geo_latitude, geo_longitude, extra, created_at, updated_at, deleted_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
                 params![
                     task_id.clone(),
                     task.uid,
@@ -496,6 +529,8 @@ async fn import_backup_inner(
                     task.percent_complete,
                     task.color,
                     task.position,
+                    freeform_x,
+                    freeform_y,
                     geo_lat,
                     geo_lng,
                     extra_str,
@@ -821,6 +856,8 @@ mod tests {
                 "location": "HQ Room 4",
                 "geo": { "latitude": 37.7749, "longitude": -122.4194 },
                 "url": "https://example.com/spec",
+                "freeform_x": 125.5,
+                "freeform_y": 250.0,
                 "extra": { "vendor_note": "custom ticktick token" }
             }))
             .expect("deserialize opentask update input");
@@ -887,6 +924,13 @@ mod tests {
             let geo = exp_task.geo.as_ref().unwrap();
             assert_eq!(geo.latitude, 37.7749);
             assert_eq!(geo.longitude, -122.4194);
+            let extra_obj = exp_task.extra.as_ref().expect("has extra");
+            assert_eq!(extra_obj.get("freeform_x"), Some(&serde_json::json!(125.5)));
+            assert_eq!(extra_obj.get("freeform_y"), Some(&serde_json::json!(250.0)));
+            assert_eq!(
+                extra_obj.get("vendor_note"),
+                Some(&serde_json::json!("custom ticktick token"))
+            );
 
             // Validate that exported document serializes to JSON cleanly
             let json_str = serde_json::to_string_pretty(&exported).expect("serialize opentask json");
@@ -911,6 +955,10 @@ mod tests {
                         "priority_raw": 2,
                         "status": "needs_action",
                         "tags": ["urgent"],
+                        "extra": {
+                            "freeform_x": 300.0,
+                            "freeform_y": 450.0
+                        },
                         "checklist": [
                             { "id": "sub-ext-1", "title": "First Subtask", "completed": true, "position": 0 },
                             { "id": "sub-ext-2", "title": "Second Subtask", "completed": false, "position": 1 }
@@ -937,6 +985,21 @@ mod tests {
             assert_eq!(imported_task.status, "needs_action");
             assert!(!imported_task.completed);
 
+            assert_eq!(imported_task.freeform_x, Some(300.0));
+            assert_eq!(imported_task.freeform_y, Some(450.0));
+
+            // 3. Round-trip: import exported backup into a separate fresh DB and verify coordinates restored
+            let (conn2, temp_dir2) = setup_test_conn().await;
+            import_backup_json_impl(&conn2, &json_str)
+                .await
+                .expect("import exported backup into new db");
+            let rt_task = fetch_task_by_id(&conn2, &task.id)
+                .await
+                .expect("fetch roundtrip task")
+                .expect("roundtrip task found");
+            assert_eq!(rt_task.freeform_x, Some(125.5));
+            assert_eq!(rt_task.freeform_y, Some(250.0));
+            let _ = std::fs::remove_dir_all(temp_dir2);
             // Verify checklist items were converted to subtasks with parent_id
             let sub1 = fetch_task_by_id(&conn, "sub-ext-1")
                 .await

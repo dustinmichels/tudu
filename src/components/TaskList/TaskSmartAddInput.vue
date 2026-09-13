@@ -233,7 +233,13 @@ async function handleAddTask() {
 		if (tagsToAssign.size > 0) {
 			for (const tag of tagsToAssign) {
 				try {
-					await assignTag(created.id, tag);
+					const trimmed = tag.trim().replace(/^#/, "");
+					if (!trimmed) continue;
+					const existing = tagStore.tags.find(
+						(t) => t.name.toLowerCase() === trimmed.toLowerCase() || t.id === trimmed,
+					);
+					const tagObj = existing ?? (await tagStore.createTag(trimmed));
+					await assignTag(created.id, tagObj.id);
 				} catch (tagErr) {
 					console.error(`Failed to assign tag ${tag} to created task:`, tagErr);
 				}

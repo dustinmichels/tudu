@@ -125,10 +125,10 @@ pub struct UpdateTaskInput {
     pub color: Option<Option<String>>,
     #[serde(default)]
     pub position: Option<i64>,
-    #[serde(default, alias = "freeformX")]
-    pub freeform_x: Option<f64>,
-    #[serde(default, alias = "freeformY")]
-    pub freeform_y: Option<f64>,
+    #[serde(default, alias = "freeformX", deserialize_with = "double_option")]
+    pub freeform_x: Option<Option<f64>>,
+    #[serde(default, alias = "freeformY", deserialize_with = "double_option")]
+    pub freeform_y: Option<Option<f64>>,
     #[serde(default, alias = "geoLatitude", deserialize_with = "double_option")]
     pub geo_latitude: Option<Option<f64>>,
     #[serde(default, alias = "geoLongitude", deserialize_with = "double_option")]

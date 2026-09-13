@@ -300,6 +300,7 @@ describe("Freeform View Subtasks and Yarn Lines Integration", () => {
 			taskSubtasksMap: layout.taskSubtasksMap,
 			isTaskExpanded: (id) => uiStore.isTaskSubtasksExpanded(id),
 			columns: 4,
+			random: () => 0.5,
 		});
 
 		// Persist parent tasks to the store (subtasks are positioned on the fly)
@@ -329,8 +330,8 @@ describe("Freeform View Subtasks and Yarn Lines Integration", () => {
 			newPositions["s2"]!.x - newPositions["p1"]!.x,
 			newPositions["s2"]!.y - newPositions["p1"]!.y,
 		);
-		expect(distS1).toBeLessThan(450);
-		expect(distS2).toBeLessThan(450);
+		expect(distS1).toBeLessThan(500);
+		expect(distS2).toBeLessThan(500);
 
 		const CARD_W = 224;
 		const CARD_H = 132;

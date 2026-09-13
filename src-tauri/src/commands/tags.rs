@@ -183,7 +183,8 @@ pub async fn assign_tag_impl(
     {
         row.get::<String>(0).map_err(|e| format!("Failed to read tag ID: {}", e))?
     } else {
-        return Err(format!("Tag '{}' does not exist", tag_id));
+        let new_tag = create_tag_impl(conn, tag_id.clone(), None).await?;
+        new_tag.id
     };
 
     let now = now_iso();
@@ -411,6 +412,41 @@ mod tests {
                 .map(|t| (t.name.clone(), t.task_count))
                 .collect();
             assert_eq!(tag_map.get("frontend"), Some(&1));
+
+            let _ = std::fs::remove_dir_all(temp_dir);
+        });
+    }
+    #[test]
+    fn test_assign_tag_auto_creates_tag() {
+        tauri::async_runtime::block_on(async {
+            let (conn, temp_dir) = setup_test_conn().await;
+            let work_list = create_list_impl(&conn, "Work".to_string(), None, None)
+                .await
+                .expect("create work list");
+            let task = create_task_impl(&conn, work_list.id.clone(), "Task".to_string(), None, None, None)
+                .await
+                .expect("create task");
+
+            // Assigning a tag by name that doesn't exist yet should automatically create it
+            assign_tag_impl(&conn, task.id.clone(), "new_feature".to_string())
+                .await
+                .expect("assign tag auto creates");
+
+            let tags = get_tags_impl(&conn).await.expect("get tags");
+            assert_eq!(tags.len(), 1);
+            assert_eq!(tags[0].name, "new_feature");
+
+            let task_tags = conn
+                .query(
+                    "SELECT tag_id FROM task_tags WHERE task_id = ?1 AND deleted_at IS NULL",
+                    params![task.id.clone()],
+                )
+                .await
+                .expect("query task_tags");
+            let mut rows = task_tags;
+            let row = rows.next().await.unwrap().expect("has row");
+            let assigned_tag_id: String = row.get(0).unwrap();
+            assert_eq!(assigned_tag_id, tags[0].id);
 
             let _ = std::fs::remove_dir_all(temp_dir);
         });
