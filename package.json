@@ -9,6 +9,8 @@
 		"preview": "vite preview",
 		"tauri": "tauri",
 		"db:reset": "./scripts/reset-db.sh",
+		"test": "bun test",
+		"test:typecheck": "vue-tsc --noEmit && tsc --noEmit -p tsconfig.tests.json",
 		"fmt": "oxfmt ."
 	},
 	"dependencies": {
@@ -21,6 +23,8 @@
 	"devDependencies": {
 		"@tailwindcss/vite": "^4.3.3",
 		"@tauri-apps/cli": "^2",
+		"@types/bun": "^1.4.2",
+		"@types/node": "^26.5.1",
 		"@vitejs/plugin-vue": "^6.0.7",
 		"oxfmt": "latest",
 		"tailwindcss": "^4.3.3",

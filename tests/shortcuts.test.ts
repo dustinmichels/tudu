@@ -293,10 +293,10 @@ describe("Keyboard Shortcuts & Navigation", () => {
 		filterStore.setTagFilter(null);
 		listStore.setActiveView(null);
 		listStore.setActiveList(null);
-		uiStore.setCalendarView(true);
+		uiStore.setViewMode("calendar");
 		taskStore.setActiveTask(null);
 
-		expect(uiStore.isCalendarView).toBe(true);
+		expect(uiStore.viewMode).toBe("calendar");
 		expect(listStore.activeView).toBe(null);
 		expect(listStore.activeListId).toBe(null);
 		expect(filterStore.selectedTag).toBe(null);
@@ -361,6 +361,95 @@ describe("Keyboard Shortcuts & Navigation", () => {
 				hasSelection: false,
 			}),
 		).toBe(true);
+	});
+
+	it("handleGlobalShortcut: switches view mode with Cmd+L, Cmd+C, and Cmd+F", () => {
+		const { handleGlobalShortcut } = require("../src/composables/useKeyboardShortcuts.ts");
+		const filterStore = useFilterStore();
+		const listStore = useListStore();
+		const taskStore = useTaskStore();
+		const uiStore = useUIStore();
+		const stores = { filterStore, listStore, taskStore, uiStore };
+
+		function createModEvent(key: string, target: EventTarget | Partial<HTMLElement> | null = null) {
+			let prevented = false;
+			return {
+				key,
+				metaKey: true,
+				ctrlKey: false,
+				shiftKey: false,
+				altKey: false,
+				target,
+				preventDefault: () => {
+					prevented = true;
+				},
+				get defaultPrevented() {
+					return prevented;
+				},
+			} as unknown as KeyboardEvent;
+		}
+
+		// Start in list view
+		uiStore.setViewMode("list");
+		expect(uiStore.viewMode).toBe("list");
+
+		// Cmd + C -> calendar view
+		const calEvent = createModEvent("c");
+		const calHandled = handleGlobalShortcut(calEvent, stores);
+		expect(calHandled).toBe(true);
+		expect(calEvent.defaultPrevented).toBe(true);
+		expect(uiStore.viewMode).toBe("calendar");
+
+		// Cmd + F -> freeform view
+		const ffEvent = createModEvent("f");
+		const ffHandled = handleGlobalShortcut(ffEvent, stores);
+		expect(ffHandled).toBe(true);
+		expect(ffEvent.defaultPrevented).toBe(true);
+		expect(uiStore.viewMode).toBe("freeform");
+
+		// Cmd + L -> list view
+		const listEvent = createModEvent("l");
+		const listHandled = handleGlobalShortcut(listEvent, stores);
+		expect(listHandled).toBe(true);
+		expect(listEvent.defaultPrevented).toBe(true);
+		expect(uiStore.viewMode).toBe("list");
+
+		// Cmd+C is guarded when user is typing in an input (allows native copy)
+		const inputTarget = { tagName: "INPUT" };
+		const calInInput = createModEvent("c", inputTarget);
+		expect(handleGlobalShortcut(calInInput, stores)).toBe(false);
+		expect(calInInput.defaultPrevented).toBe(false);
+		expect(uiStore.viewMode).toBe("list");
+
+		// Cmd+C is guarded when text is highlighted (allows native copy)
+		const winGlobal = globalThis as unknown as { window?: { getSelection?: () => unknown } };
+		const hadWindow = "window" in globalThis;
+		const originalWindow = winGlobal.window;
+		try {
+			winGlobal.window = {
+				getSelection: () => ({ toString: () => "selected text" }),
+			};
+			const calWithSelection = createModEvent("c");
+			expect(handleGlobalShortcut(calWithSelection, stores)).toBe(false);
+			expect(calWithSelection.defaultPrevented).toBe(false);
+			expect(uiStore.viewMode).toBe("list");
+		} finally {
+			if (hadWindow) {
+				winGlobal.window = originalWindow;
+			} else {
+				delete (globalThis as Record<string, unknown>).window;
+			}
+		}
+		// Cmd+F and Cmd+L work even when an input is focused
+		const ffInInput = createModEvent("f", inputTarget);
+		expect(handleGlobalShortcut(ffInInput, stores)).toBe(true);
+		expect(ffInInput.defaultPrevented).toBe(true);
+		expect(uiStore.viewMode).toBe("freeform");
+
+		const listInInput = createModEvent("l", inputTarget);
+		expect(handleGlobalShortcut(listInInput, stores)).toBe(true);
+		expect(listInInput.defaultPrevented).toBe(true);
+		expect(uiStore.viewMode).toBe("list");
 	});
 
 	it("useKeyboardShortcuts: isEditingInput correctly identifies form inputs", () => {
@@ -647,5 +736,223 @@ describe("Keyboard Shortcuts & Navigation", () => {
 		expect(taskStore.activeTaskId).toBe(null);
 		expect(uiStore.isSidebarOpen).toBe(false);
 		expect(listStore.activeView).toBe("inbox");
+	});
+
+	it("handleGlobalShortcut: j and k navigate sequentially according to visual/sorted task order", () => {
+		const { handleGlobalShortcut } = require("../src/composables/useKeyboardShortcuts.ts");
+		const filterStore = useFilterStore();
+		const listStore = useListStore();
+		const taskStore = useTaskStore();
+		const uiStore = useUIStore();
+		const stores = { filterStore, listStore, taskStore, uiStore };
+
+		function createKeyEvent(key: string) {
+			let prevented = false;
+			return {
+				key,
+				metaKey: false,
+				ctrlKey: false,
+				shiftKey: false,
+				altKey: false,
+				repeat: false,
+				target: null,
+				preventDefault: () => {
+					prevented = true;
+				},
+				get defaultPrevented() {
+					return prevented;
+				},
+			} as unknown as KeyboardEvent;
+		}
+
+		// Store order (raw/unsorted from API)
+		taskStore.tasks = [
+			{ id: "task-A", title: "Alpha", parent_id: null } as unknown as Task,
+			{ id: "task-B", title: "Beta", parent_id: null } as unknown as Task,
+			{ id: "task-C", title: "Gamma", parent_id: null } as unknown as Task,
+		];
+		taskStore.setActiveTask(null);
+
+		// Scenario 1: Fallback without DOM (uses store order)
+		expect(handleGlobalShortcut(createKeyEvent("j"), stores)).toBe(true);
+		expect(taskStore.activeTaskId).toBe("task-A");
+		expect(handleGlobalShortcut(createKeyEvent("j"), stores)).toBe(true);
+		expect(taskStore.activeTaskId).toBe("task-B");
+		expect(handleGlobalShortcut(createKeyEvent("k"), stores)).toBe(true);
+		expect(taskStore.activeTaskId).toBe("task-A");
+
+		// Scenario 2: Sorted order in DOM (e.g. sorted by due date or created date: C -> B -> A)
+		const winGlobal = globalThis as unknown as { document?: unknown };
+		const hadDoc = "document" in globalThis;
+		const originalDoc = winGlobal.document;
+		try {
+			const domIds = ["task-C", "task-B", "task-A"];
+			winGlobal.document = {
+				querySelectorAll: (sel: string) => {
+					if (sel === "[data-task-id]") {
+						return domIds.map((id) => ({
+							getAttribute: (attr: string) => (attr === "data-task-id" ? id : null),
+						}));
+					}
+					return [];
+				},
+				querySelector: () => ({
+					scrollIntoView: () => {},
+				}),
+			};
+
+			taskStore.setActiveTask(null);
+			// Initial j selects first sorted task (task-C)
+			expect(handleGlobalShortcut(createKeyEvent("j"), stores)).toBe(true);
+			expect(taskStore.activeTaskId).toBe("task-C");
+
+			// Next j selects next sorted task (task-B)
+			expect(handleGlobalShortcut(createKeyEvent("j"), stores)).toBe(true);
+			expect(taskStore.activeTaskId).toBe("task-B");
+
+			// Next j selects next sorted task (task-A)
+			expect(handleGlobalShortcut(createKeyEvent("j"), stores)).toBe(true);
+			expect(taskStore.activeTaskId).toBe("task-A");
+
+			// Boundary: pressing j at the end stays at task-A
+			expect(handleGlobalShortcut(createKeyEvent("j"), stores)).toBe(true);
+			expect(taskStore.activeTaskId).toBe("task-A");
+
+			// Previous k selects task-B
+			expect(handleGlobalShortcut(createKeyEvent("k"), stores)).toBe(true);
+			expect(taskStore.activeTaskId).toBe("task-B");
+
+			// Previous k selects task-C
+			expect(handleGlobalShortcut(createKeyEvent("k"), stores)).toBe(true);
+			expect(taskStore.activeTaskId).toBe("task-C");
+
+			// Boundary: pressing k at top stays at task-C
+			expect(handleGlobalShortcut(createKeyEvent("k"), stores)).toBe(true);
+			expect(taskStore.activeTaskId).toBe("task-C");
+
+			// ArrowDown / ArrowUp behave identically to j / k
+			expect(handleGlobalShortcut(createKeyEvent("ArrowDown"), stores)).toBe(true);
+			expect(taskStore.activeTaskId).toBe("task-B");
+			expect(handleGlobalShortcut(createKeyEvent("ArrowUp"), stores)).toBe(true);
+			expect(taskStore.activeTaskId).toBe("task-C");
+		} finally {
+			if (hadDoc) {
+				winGlobal.document = originalDoc;
+			} else {
+				delete (globalThis as Record<string, unknown>).document;
+			}
+		}
+	});
+
+	it("handleGlobalShortcut: j and k navigate through subtasks when visible in DOM", () => {
+		const { handleGlobalShortcut } = require("../src/composables/useKeyboardShortcuts.ts");
+		const filterStore = useFilterStore();
+		const listStore = useListStore();
+		const taskStore = useTaskStore();
+		const uiStore = useUIStore();
+		const stores = { filterStore, listStore, taskStore, uiStore };
+
+		function createKeyEvent(key: string) {
+			let prevented = false;
+			return {
+				key,
+				metaKey: false,
+				ctrlKey: false,
+				shiftKey: false,
+				altKey: false,
+				repeat: false,
+				target: null,
+				preventDefault: () => {
+					prevented = true;
+				},
+				get defaultPrevented() {
+					return prevented;
+				},
+			} as unknown as KeyboardEvent;
+		}
+
+		const winGlobal = globalThis as unknown as { document?: unknown };
+		const hadDoc = "document" in globalThis;
+		const originalDoc = winGlobal.document;
+		try {
+			// DOM contains Parent 1 -> Subtask 1.1 -> Subtask 1.2 -> Parent 2
+			const domIds = ["parent-1", "sub-1-1", "sub-1-2", "parent-2"];
+			winGlobal.document = {
+				querySelectorAll: (sel: string) => {
+					if (sel === "[data-task-id]") {
+						return domIds.map((id) => ({
+							getAttribute: (attr: string) => (attr === "data-task-id" ? id : null),
+						}));
+					}
+					return [];
+				},
+				querySelector: () => ({
+					scrollIntoView: () => {},
+				}),
+			};
+
+			taskStore.setActiveTask("parent-1");
+			expect(handleGlobalShortcut(createKeyEvent("j"), stores)).toBe(true);
+			expect(taskStore.activeTaskId).toBe("sub-1-1");
+
+			expect(handleGlobalShortcut(createKeyEvent("j"), stores)).toBe(true);
+			expect(taskStore.activeTaskId).toBe("sub-1-2");
+
+			expect(handleGlobalShortcut(createKeyEvent("j"), stores)).toBe(true);
+			expect(taskStore.activeTaskId).toBe("parent-2");
+
+			expect(handleGlobalShortcut(createKeyEvent("k"), stores)).toBe(true);
+			expect(taskStore.activeTaskId).toBe("sub-1-2");
+		} finally {
+			if (hadDoc) {
+				winGlobal.document = originalDoc;
+			} else {
+				delete (globalThis as Record<string, unknown>).document;
+			}
+		}
+	});
+
+	it("handleGlobalShortcut: respects options.getVisibleTasks if provided", () => {
+		const { handleGlobalShortcut } = require("../src/composables/useKeyboardShortcuts.ts");
+		const filterStore = useFilterStore();
+		const listStore = useListStore();
+		const taskStore = useTaskStore();
+		const uiStore = useUIStore();
+		const stores = { filterStore, listStore, taskStore, uiStore };
+
+		function createKeyEvent(key: string) {
+			let prevented = false;
+			return {
+				key,
+				metaKey: false,
+				ctrlKey: false,
+				shiftKey: false,
+				altKey: false,
+				repeat: false,
+				target: null,
+				preventDefault: () => {
+					prevented = true;
+				},
+				get defaultPrevented() {
+					return prevented;
+				},
+			} as unknown as KeyboardEvent;
+		}
+
+		taskStore.tasks = [
+			{ id: "task-1", title: "Task 1", parent_id: null } as unknown as Task,
+			{ id: "task-2", title: "Task 2", parent_id: null } as unknown as Task,
+		];
+		taskStore.setActiveTask("custom-2");
+
+		const options = {
+			getVisibleTasks: () => ["custom-1", "custom-2", "custom-3"],
+		};
+
+		expect(handleGlobalShortcut(createKeyEvent("j"), stores, options)).toBe(true);
+		expect(taskStore.activeTaskId).toBe("custom-3");
+
+		expect(handleGlobalShortcut(createKeyEvent("k"), stores, options)).toBe(true);
+		expect(taskStore.activeTaskId).toBe("custom-2");
 	});
 });

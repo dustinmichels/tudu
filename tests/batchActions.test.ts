@@ -72,7 +72,7 @@ mock.module("@tauri-apps/api/core", () => ({
 	},
 }));
 
-describe("Phase 6: Center Pane (Batch Actions & Task Row Item)", () => {
+describe("Batch Actions & Task Row Item", () => {
 	beforeEach(() => {
 		setActivePinia(createPinia());
 		mockInvokes.length = 0;
@@ -193,9 +193,9 @@ describe("Phase 6: Center Pane (Batch Actions & Task Row Item)", () => {
 
 		const tagged = await taskStore.fetchTasks(null, undefined, null, "urgent");
 		expect(tagged.length).toBe(1);
-		expect(tagged[0].id).toBe("t1");
+		expect(tagged[0]?.id).toBe("t1");
 		expect(taskStore.tasks.length).toBe(1);
-		expect(taskStore.tasks[0].id).toBe("t1");
+		expect(taskStore.tasks[0]?.id).toBe("t1");
 
 		const getTasksCall = mockInvokes.find((i) => {
 			if (i.command !== "get_tasks") return false;

@@ -2,12 +2,10 @@ use libsql::{params, Connection};
 use tauri::State;
 use uuid::Uuid;
 
+use super::common::{fetch_tags_for_task_ids, now_iso, row_to_task, TASK_SELECT_COLS};
+use super::notes::get_notes_impl;
 use crate::db::DbState;
 use crate::models::{BatchUpdateTasksInput, Task, TaskDetail, UpdateTaskInput};
-use super::common::{
-    fetch_tags_for_task_ids, now_iso, row_to_task, TASK_SELECT_COLS,
-};
-use super::notes::get_notes_impl;
 
 // ---------------------------------------------------------------------------
 // Task Commands
@@ -24,7 +22,10 @@ pub async fn get_tasks_impl(
     parent_id: Option<Option<String>>,
 ) -> Result<Vec<Task>, String> {
     let include_completed = include_completed.unwrap_or(false);
-    let is_trash = matches!(view.as_deref().map(|v| v.trim().to_lowercase()).as_deref(), Some("trash"));
+    let is_trash = matches!(
+        view.as_deref().map(|v| v.trim().to_lowercase()).as_deref(),
+        Some("trash")
+    );
     let mut conditions = if is_trash {
         vec!["t.deleted_at IS NOT NULL".to_string()]
     } else {
@@ -64,7 +65,10 @@ pub async fn get_tasks_impl(
         let trimmed = df.trim();
         if !trimmed.is_empty() {
             param_values.push(libsql::Value::Text(trimmed.to_string()));
-            conditions.push(format!("(t.due IS NOT NULL AND date(t.due) >= date(?{}))", param_values.len()));
+            conditions.push(format!(
+                "(t.due IS NOT NULL AND date(t.due) >= date(?{}))",
+                param_values.len()
+            ));
         }
     }
 
@@ -72,7 +76,10 @@ pub async fn get_tasks_impl(
         let trimmed = dt.trim();
         if !trimmed.is_empty() {
             param_values.push(libsql::Value::Text(trimmed.to_string()));
-            conditions.push(format!("(t.due IS NOT NULL AND date(t.due) <= date(?{}))", param_values.len()));
+            conditions.push(format!(
+                "(t.due IS NOT NULL AND date(t.due) <= date(?{}))",
+                param_values.len()
+            ));
         }
     }
 
@@ -101,7 +108,10 @@ pub async fn get_tasks_impl(
                 if !include_completed {
                     conditions.push("t.completed = 0".to_string());
                 }
-                conditions.push("(t.due IS NOT NULL AND date(t.due) = date('now', 'localtime', '+1 day'))".to_string());
+                conditions.push(
+                    "(t.due IS NOT NULL AND date(t.due) = date('now', 'localtime', '+1 day'))"
+                        .to_string(),
+                );
             }
             "this_week" => {
                 if include_completed {
@@ -114,7 +124,9 @@ pub async fn get_tasks_impl(
                 if !include_completed {
                     conditions.push("t.completed = 0".to_string());
                 }
-                conditions.push("(t.due IS NOT NULL AND date(t.due) < date('now', 'localtime'))".to_string());
+                conditions.push(
+                    "(t.due IS NOT NULL AND date(t.due) < date('now', 'localtime'))".to_string(),
+                );
             }
             "trash" => {
                 if !include_completed {
@@ -296,11 +308,19 @@ pub async fn create_task_impl(
 
     let target_list_id = if list_id.trim().is_empty() {
         let mut inbox_rows = conn
-            .query("SELECT id FROM lists WHERE lower(name) = 'inbox' AND deleted_at IS NULL LIMIT 1", ())
+            .query(
+                "SELECT id FROM lists WHERE lower(name) = 'inbox' AND deleted_at IS NULL LIMIT 1",
+                (),
+            )
             .await
             .map_err(|e| format!("Failed to find Inbox list: {}", e))?;
-        if let Some(row) = inbox_rows.next().await.map_err(|e| format!("Failed to fetch inbox: {}", e))? {
-            row.get::<String>(0).map_err(|e| format!("Failed to get inbox id: {}", e))?
+        if let Some(row) = inbox_rows
+            .next()
+            .await
+            .map_err(|e| format!("Failed to fetch inbox: {}", e))?
+        {
+            row.get::<String>(0)
+                .map_err(|e| format!("Failed to get inbox id: {}", e))?
         } else {
             return Err("No list specified and default Inbox list not found".to_string());
         }
@@ -389,6 +409,8 @@ pub async fn create_task_impl(
         percent_complete: 0,
         color: None,
         position: 0,
+        freeform_x: None,
+        freeform_y: None,
         geo_latitude: None,
         geo_longitude: None,
         extra: None,
@@ -510,6 +532,8 @@ pub async fn update_task_impl(conn: &Connection, task: UpdateTaskInput) -> Resul
         None => existing.color,
     };
     let position = task.position.unwrap_or(existing.position);
+    let freeform_x = task.freeform_x.or(existing.freeform_x);
+    let freeform_y = task.freeform_y.or(existing.freeform_y);
 
     let (geo_latitude, geo_longitude) = if let Some(geo_opt) = task.geo {
         match geo_opt {
@@ -544,7 +568,8 @@ pub async fn update_task_impl(conn: &Connection, task: UpdateTaskInput) -> Resul
              location = ?11, url = ?12, completed = ?13,
              completed_at = ?14, status = ?15, start = ?16, duration = ?17,
              timezone = ?18, percent_complete = ?19, color = ?20, position = ?21,
-             geo_latitude = ?22, geo_longitude = ?23, extra = ?24, updated_at = ?25
+             freeform_x = ?22, freeform_y = ?23, geo_latitude = ?24,
+             geo_longitude = ?25, extra = ?26, updated_at = ?27
          WHERE id = ?1 AND deleted_at IS NULL",
         params![
             id.to_string(),
@@ -568,6 +593,8 @@ pub async fn update_task_impl(conn: &Connection, task: UpdateTaskInput) -> Resul
             percent_complete,
             color,
             position,
+            freeform_x,
+            freeform_y,
             geo_latitude,
             geo_longitude,
             extra_str,
@@ -800,7 +827,9 @@ mod tests {
     use super::*;
     use crate::commands::common::setup_test_conn;
     use crate::commands::lists::{create_list_impl, get_lists_impl, update_list_impl};
-    use crate::commands::notes::{add_note_impl, delete_note_impl, get_notes_impl, update_note_impl};
+    use crate::commands::notes::{
+        add_note_impl, delete_note_impl, get_notes_impl, update_note_impl,
+    };
     use crate::commands::tags::{assign_tag_impl, create_tag_impl, remove_tag_impl};
     use crate::db::init_db;
 
@@ -844,9 +873,18 @@ mod tests {
             assert_eq!(subtask.parent_id, Some(parent.id.clone()));
 
             // Get tasks excluding completed
-            let active_tasks = get_tasks_impl(&conn, Some(list.id.clone()), None, None, None, None, None, None)
-                .await
-                .expect("get active tasks");
+            let active_tasks = get_tasks_impl(
+                &conn,
+                Some(list.id.clone()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("get active tasks");
             assert_eq!(active_tasks.len(), 2);
 
             // Toggle subtask complete
@@ -858,16 +896,34 @@ mod tests {
             assert!(toggled.completed_at.is_some());
 
             // Get tasks without completed -> only parent returned
-            let incomplete = get_tasks_impl(&conn, Some(list.id.clone()), Some(false), None, None, None, None, None)
-                .await
-                .expect("get incomplete tasks");
+            let incomplete = get_tasks_impl(
+                &conn,
+                Some(list.id.clone()),
+                Some(false),
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("get incomplete tasks");
             assert_eq!(incomplete.len(), 1);
             assert_eq!(incomplete[0].id, parent.id);
 
             // Get tasks including completed -> both returned
-            let all = get_tasks_impl(&conn, Some(list.id.clone()), Some(true), None, None, None, None, None)
-                .await
-                .expect("get all tasks");
+            let all = get_tasks_impl(
+                &conn,
+                Some(list.id.clone()),
+                Some(true),
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("get all tasks");
             assert_eq!(all.len(), 2);
 
             // Toggle back to incomplete
@@ -878,7 +934,7 @@ mod tests {
             assert_eq!(untoggled.status, "needs_action");
             assert!(untoggled.completed_at.is_none());
 
-            // Update task with description, rrule, is_all_day, priority, start, duration, timezone
+            // Update task metadata, including persisted freeform board placement
             let update_payload: UpdateTaskInput = serde_json::from_value(serde_json::json!({
                 "id": parent.id,
                 "title": "Updated Parent Title",
@@ -891,6 +947,8 @@ mod tests {
                 "timezone": "America/New_York",
                 "percent_complete": 50,
                 "color": "#3b82f6",
+                "freeform_x": 184.0,
+                "freeform_y": 296.0,
                 "geo": {
                     "latitude": 40.7128,
                     "longitude": -74.0060
@@ -913,6 +971,8 @@ mod tests {
             assert_eq!(updated.timezone, Some("America/New_York".to_string()));
             assert_eq!(updated.percent_complete, 50);
             assert_eq!(updated.color, Some("#3b82f6".to_string()));
+            assert_eq!(updated.freeform_x, Some(184.0));
+            assert_eq!(updated.freeform_y, Some(296.0));
             assert_eq!(updated.geo_latitude, Some(40.7128));
             assert_eq!(updated.geo_longitude, Some(-74.0060));
 
@@ -921,9 +981,18 @@ mod tests {
                 .await
                 .expect("delete parent task");
 
-            let after_delete = get_tasks_impl(&conn, Some(list.id.clone()), Some(true), None, None, None, None, None)
-                .await
-                .expect("get tasks after delete");
+            let after_delete = get_tasks_impl(
+                &conn,
+                Some(list.id.clone()),
+                Some(true),
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("get tasks after delete");
             assert_eq!(after_delete.len(), 0);
 
             // Direct check in DB that subtask also has deleted_at set
@@ -1017,13 +1086,25 @@ mod tests {
                     .expect("get lists after restart");
                 assert_eq!(lists.len(), 2);
                 assert!(lists.iter().any(|l| l.name == "Inbox"));
-                let proj_list = lists.iter().find(|l| l.id == list_id).expect("Project Launch list");
+                let proj_list = lists
+                    .iter()
+                    .find(|l| l.id == list_id)
+                    .expect("Project Launch list");
                 assert_eq!(proj_list.name, "Project Launch");
                 assert_eq!(proj_list.color, Some("#10b981".to_string()));
                 // Verify tasks were persisted
-                let all_tasks = get_tasks_impl(conn2, Some(list_id.clone()), Some(true), None, None, None, None, None)
-                    .await
-                    .expect("get all tasks after restart");
+                let all_tasks = get_tasks_impl(
+                    conn2,
+                    Some(list_id.clone()),
+                    Some(true),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                .expect("get all tasks after restart");
                 assert_eq!(all_tasks.len(), 2);
 
                 let persisted_task1 = all_tasks
@@ -1049,9 +1130,18 @@ mod tests {
                 assert!(persisted_task2.completed_at.is_none());
 
                 // Incomplete tasks query should only return task 2
-                let incomplete_tasks = get_tasks_impl(conn2, Some(list_id.clone()), Some(false), None, None, None, None, None)
-                    .await
-                    .expect("get incomplete tasks after restart");
+                let incomplete_tasks = get_tasks_impl(
+                    conn2,
+                    Some(list_id.clone()),
+                    Some(false),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                .expect("get incomplete tasks after restart");
                 assert_eq!(incomplete_tasks.len(), 1);
                 assert_eq!(incomplete_tasks[0].id, task2_id);
             }
@@ -1075,7 +1165,13 @@ mod tests {
                 &conn,
                 inbox_id.clone(),
                 "Overdue task".to_string(),
-                Some(chrono::Local::now().checked_sub_signed(chrono::Duration::days(1)).unwrap().format("%Y-%m-%d").to_string()),
+                Some(
+                    chrono::Local::now()
+                        .checked_sub_signed(chrono::Duration::days(1))
+                        .unwrap()
+                        .format("%Y-%m-%d")
+                        .to_string(),
+                ),
                 Some(1),
                 None,
             )
@@ -1099,7 +1195,13 @@ mod tests {
                 &conn,
                 inbox_id.clone(),
                 "Tomorrow task".to_string(),
-                Some(chrono::Local::now().checked_add_signed(chrono::Duration::days(1)).unwrap().format("%Y-%m-%d").to_string()),
+                Some(
+                    chrono::Local::now()
+                        .checked_add_signed(chrono::Duration::days(1))
+                        .unwrap()
+                        .format("%Y-%m-%d")
+                        .to_string(),
+                ),
                 None,
                 None,
             )
@@ -1111,7 +1213,13 @@ mod tests {
                 &conn,
                 inbox_id.clone(),
                 "This week task".to_string(),
-                Some(chrono::Local::now().checked_add_signed(chrono::Duration::days(4)).unwrap().format("%Y-%m-%d").to_string()),
+                Some(
+                    chrono::Local::now()
+                        .checked_add_signed(chrono::Duration::days(4))
+                        .unwrap()
+                        .format("%Y-%m-%d")
+                        .to_string(),
+                ),
                 None,
                 None,
             )
@@ -1123,7 +1231,13 @@ mod tests {
                 &conn,
                 inbox_id.clone(),
                 "Future task".to_string(),
-                Some(chrono::Local::now().checked_add_signed(chrono::Duration::days(20)).unwrap().format("%Y-%m-%d").to_string()),
+                Some(
+                    chrono::Local::now()
+                        .checked_add_signed(chrono::Duration::days(20))
+                        .unwrap()
+                        .format("%Y-%m-%d")
+                        .to_string(),
+                ),
                 None,
                 None,
             )
@@ -1131,25 +1245,52 @@ mod tests {
             .expect("create future task");
 
             // Query "today" view -> overdue + today (2 tasks)
-            let today_tasks = get_tasks_impl(&conn, None, Some(false), Some("today".to_string()), None, None, None, None)
-                .await
-                .expect("get today tasks");
+            let today_tasks = get_tasks_impl(
+                &conn,
+                None,
+                Some(false),
+                Some("today".to_string()),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("get today tasks");
             assert_eq!(today_tasks.len(), 2);
             let titles: Vec<String> = today_tasks.into_iter().map(|t| t.title).collect();
             assert!(titles.contains(&"Overdue task".to_string()));
             assert!(titles.contains(&"Today task".to_string()));
 
             // Query "tomorrow" view -> tomorrow task (1 task)
-            let tomorrow_tasks = get_tasks_impl(&conn, None, Some(false), Some("tomorrow".to_string()), None, None, None, None)
-                .await
-                .expect("get tomorrow tasks");
+            let tomorrow_tasks = get_tasks_impl(
+                &conn,
+                None,
+                Some(false),
+                Some("tomorrow".to_string()),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("get tomorrow tasks");
             assert_eq!(tomorrow_tasks.len(), 1);
             assert_eq!(tomorrow_tasks[0].title, "Tomorrow task");
 
             // Query "this_week" view -> overdue, today, tomorrow, and in 4 days (4 tasks, excludes in 20 days)
-            let this_week_tasks = get_tasks_impl(&conn, None, Some(false), Some("this_week".to_string()), None, None, None, None)
-                .await
-                .expect("get this week tasks");
+            let this_week_tasks = get_tasks_impl(
+                &conn,
+                None,
+                Some(false),
+                Some("this_week".to_string()),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("get this week tasks");
             assert_eq!(this_week_tasks.len(), 4);
             let week_titles: Vec<String> = this_week_tasks.into_iter().map(|t| t.title).collect();
             assert!(week_titles.contains(&"Overdue task".to_string()));
@@ -1159,9 +1300,18 @@ mod tests {
             assert!(!week_titles.contains(&"Future task".to_string()));
 
             // Query "overdue" view -> overdue task (1 task)
-            let overdue_tasks = get_tasks_impl(&conn, None, Some(false), Some("overdue".to_string()), None, None, None, None)
-                .await
-                .expect("get overdue tasks");
+            let overdue_tasks = get_tasks_impl(
+                &conn,
+                None,
+                Some(false),
+                Some("overdue".to_string()),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("get overdue tasks");
             assert_eq!(overdue_tasks.len(), 1);
             assert_eq!(overdue_tasks[0].title, "Overdue task");
 
@@ -1182,10 +1332,18 @@ mod tests {
                 &conn,
                 inbox_id.clone(),
                 "Overdue incomplete".to_string(),
-                Some(chrono::Local::now().checked_sub_signed(chrono::Duration::days(3)).unwrap().format("%Y-%m-%d").to_string()),
+                Some(
+                    chrono::Local::now()
+                        .checked_sub_signed(chrono::Duration::days(3))
+                        .unwrap()
+                        .format("%Y-%m-%d")
+                        .to_string(),
+                ),
                 None,
                 None,
-            ).await.unwrap();
+            )
+            .await
+            .unwrap();
 
             create_task_impl(
                 &conn,
@@ -1194,27 +1352,47 @@ mod tests {
                 Some(chrono::Local::now().format("%Y-%m-%d").to_string()),
                 None,
                 None,
-            ).await.unwrap();
+            )
+            .await
+            .unwrap();
 
             create_task_impl(
                 &conn,
                 inbox_id.clone(),
                 "Week incomplete".to_string(),
-                Some(chrono::Local::now().checked_add_signed(chrono::Duration::days(3)).unwrap().format("%Y-%m-%d").to_string()),
+                Some(
+                    chrono::Local::now()
+                        .checked_add_signed(chrono::Duration::days(3))
+                        .unwrap()
+                        .format("%Y-%m-%d")
+                        .to_string(),
+                ),
                 None,
                 None,
-            ).await.unwrap();
+            )
+            .await
+            .unwrap();
 
             // Completed tasks
             let t_overdue_comp = create_task_impl(
                 &conn,
                 inbox_id.clone(),
                 "Overdue completed".to_string(),
-                Some(chrono::Local::now().checked_sub_signed(chrono::Duration::days(3)).unwrap().format("%Y-%m-%d").to_string()),
+                Some(
+                    chrono::Local::now()
+                        .checked_sub_signed(chrono::Duration::days(3))
+                        .unwrap()
+                        .format("%Y-%m-%d")
+                        .to_string(),
+                ),
                 None,
                 None,
-            ).await.unwrap();
-            toggle_task_complete_impl(&conn, t_overdue_comp.id, true).await.unwrap();
+            )
+            .await
+            .unwrap();
+            toggle_task_complete_impl(&conn, t_overdue_comp.id, true)
+                .await
+                .unwrap();
 
             let t_today_comp = create_task_impl(
                 &conn,
@@ -1223,23 +1401,46 @@ mod tests {
                 Some(chrono::Local::now().format("%Y-%m-%d").to_string()),
                 None,
                 None,
-            ).await.unwrap();
-            toggle_task_complete_impl(&conn, t_today_comp.id, true).await.unwrap();
+            )
+            .await
+            .unwrap();
+            toggle_task_complete_impl(&conn, t_today_comp.id, true)
+                .await
+                .unwrap();
 
             let t_week_comp = create_task_impl(
                 &conn,
                 inbox_id.clone(),
                 "Week completed".to_string(),
-                Some(chrono::Local::now().checked_add_signed(chrono::Duration::days(3)).unwrap().format("%Y-%m-%d").to_string()),
+                Some(
+                    chrono::Local::now()
+                        .checked_add_signed(chrono::Duration::days(3))
+                        .unwrap()
+                        .format("%Y-%m-%d")
+                        .to_string(),
+                ),
                 None,
                 None,
-            ).await.unwrap();
-            toggle_task_complete_impl(&conn, t_week_comp.id, true).await.unwrap();
+            )
+            .await
+            .unwrap();
+            toggle_task_complete_impl(&conn, t_week_comp.id, true)
+                .await
+                .unwrap();
 
             // 1. Today view with include_completed = true
-            let today_with_comp = get_tasks_impl(&conn, None, Some(true), Some("today".to_string()), None, None, None, None)
-                .await
-                .expect("get today tasks with completed");
+            let today_with_comp = get_tasks_impl(
+                &conn,
+                None,
+                Some(true),
+                Some("today".to_string()),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("get today tasks with completed");
             let today_titles: Vec<String> = today_with_comp.into_iter().map(|t| t.title).collect();
             assert!(today_titles.contains(&"Overdue incomplete".to_string()));
             assert!(today_titles.contains(&"Today incomplete".to_string()));
@@ -1250,18 +1451,37 @@ mod tests {
             assert!(!today_titles.contains(&"Week incomplete".to_string()));
 
             // 2. Today view with include_completed = false
-            let today_no_comp = get_tasks_impl(&conn, None, Some(false), Some("today".to_string()), None, None, None, None)
-                .await
-                .expect("get today tasks without completed");
-            let today_no_comp_titles: Vec<String> = today_no_comp.into_iter().map(|t| t.title).collect();
+            let today_no_comp = get_tasks_impl(
+                &conn,
+                None,
+                Some(false),
+                Some("today".to_string()),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("get today tasks without completed");
+            let today_no_comp_titles: Vec<String> =
+                today_no_comp.into_iter().map(|t| t.title).collect();
             assert_eq!(today_no_comp_titles.len(), 2);
             assert!(today_no_comp_titles.contains(&"Overdue incomplete".to_string()));
             assert!(today_no_comp_titles.contains(&"Today incomplete".to_string()));
 
             // 3. This Week view with include_completed = true
-            let week_with_comp = get_tasks_impl(&conn, None, Some(true), Some("this_week".to_string()), None, None, None, None)
-                .await
-                .expect("get this_week tasks with completed");
+            let week_with_comp = get_tasks_impl(
+                &conn,
+                None,
+                Some(true),
+                Some("this_week".to_string()),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("get this_week tasks with completed");
             let week_titles: Vec<String> = week_with_comp.into_iter().map(|t| t.title).collect();
             assert!(week_titles.contains(&"Overdue incomplete".to_string()));
             assert!(week_titles.contains(&"Today incomplete".to_string()));
@@ -1272,10 +1492,20 @@ mod tests {
             assert!(!week_titles.contains(&"Overdue completed".to_string()));
 
             // 4. This Week view with include_completed = false
-            let week_no_comp = get_tasks_impl(&conn, None, Some(false), Some("this_week".to_string()), None, None, None, None)
-                .await
-                .expect("get this_week tasks without completed");
-            let week_no_comp_titles: Vec<String> = week_no_comp.into_iter().map(|t| t.title).collect();
+            let week_no_comp = get_tasks_impl(
+                &conn,
+                None,
+                Some(false),
+                Some("this_week".to_string()),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("get this_week tasks without completed");
+            let week_no_comp_titles: Vec<String> =
+                week_no_comp.into_iter().map(|t| t.title).collect();
             assert_eq!(week_no_comp_titles.len(), 3);
             assert!(week_no_comp_titles.contains(&"Overdue incomplete".to_string()));
             assert!(week_no_comp_titles.contains(&"Today incomplete".to_string()));
@@ -1291,9 +1521,14 @@ mod tests {
             let (conn, temp_dir) = setup_test_conn().await;
 
             // 1. List updates
-            let list = create_list_impl(&conn, "Old List Name".to_string(), Some("#000000".to_string()), Some("List".to_string()))
-                .await
-                .expect("create list");
+            let list = create_list_impl(
+                &conn,
+                "Old List Name".to_string(),
+                Some("#000000".to_string()),
+                Some("List".to_string()),
+            )
+            .await
+            .expect("create list");
             let updated_list = update_list_impl(
                 &conn,
                 list.id.clone(),
@@ -1311,7 +1546,10 @@ mod tests {
 
             // Cannot rename Inbox
             let lists = get_lists_impl(&conn).await.unwrap();
-            let inbox = lists.iter().find(|l| l.name.to_lowercase() == "inbox").unwrap();
+            let inbox = lists
+                .iter()
+                .find(|l| l.name.to_lowercase() == "inbox")
+                .unwrap();
             let rename_inbox_err = update_list_impl(
                 &conn,
                 inbox.id.clone(),
@@ -1362,9 +1600,14 @@ mod tests {
             .expect("create subtask");
 
             // Notes
-            let note1 = add_note_impl(&conn, task.id.clone(), "First note".to_string(), Some("Title 1".to_string()))
-                .await
-                .expect("add note 1");
+            let note1 = add_note_impl(
+                &conn,
+                task.id.clone(),
+                "First note".to_string(),
+                Some("Title 1".to_string()),
+            )
+            .await
+            .expect("add note 1");
             let updated_note = update_note_impl(
                 &conn,
                 note1.id.clone(),
@@ -1523,8 +1766,8 @@ mod tests {
                 "priority": null,
                 "postpone_days": 2
             });
-            let parsed_input: BatchUpdateTasksInput = serde_json::from_value(json_payload)
-                .expect("deserialize json with priority null");
+            let parsed_input: BatchUpdateTasksInput =
+                serde_json::from_value(json_payload).expect("deserialize json with priority null");
             assert_eq!(parsed_input.priority, Some(None));
 
             let res = batch_update_tasks_impl(&conn, parsed_input)
@@ -1532,7 +1775,11 @@ mod tests {
                 .expect("batch update with priority null");
             assert_eq!(res.len(), 1);
             assert_eq!(res[0].priority, None, "Priority should be cleared to None");
-            assert_eq!(res[0].due, Some("2026-09-12".to_string()), "Date-only due should be postponed to 2026-09-12");
+            assert_eq!(
+                res[0].due,
+                Some("2026-09-12".to_string()),
+                "Date-only due should be postponed to 2026-09-12"
+            );
 
             // 7. Test postpone on unscheduled all-day task -> formats as YYYY-MM-DD
             let unscheduled_all_day = create_task_impl(
@@ -1566,8 +1813,14 @@ mod tests {
             .await
             .expect("postpone unscheduled all day task");
             assert_eq!(postpone_unscheduled.len(), 1);
-            let expected_due = (chrono::Utc::now() + chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
-            assert_eq!(postpone_unscheduled[0].due, Some(expected_due), "Unscheduled all-day task should format as YYYY-MM-DD on postpone");
+            let expected_due = (chrono::Utc::now() + chrono::Duration::days(1))
+                .format("%Y-%m-%d")
+                .to_string();
+            assert_eq!(
+                postpone_unscheduled[0].due,
+                Some(expected_due),
+                "Unscheduled all-day task should format as YYYY-MM-DD on postpone"
+            );
 
             // 8. Test postpone on timed task (is_all_day == false) with RFC3339 due -> remains RFC3339
             let timed_task = create_task_impl(
@@ -1596,7 +1849,11 @@ mod tests {
             .expect("postpone timed task");
             assert_eq!(postpone_timed.len(), 1);
             let timed_due = postpone_timed[0].due.as_ref().expect("due date present");
-            assert!(timed_due.contains("2026-09-11T14:30:00"), "Timed task must retain RFC3339 timestamp format: got {}", timed_due);
+            assert!(
+                timed_due.contains("2026-09-11T14:30:00"),
+                "Timed task must retain RFC3339 timestamp format: got {}",
+                timed_due
+            );
 
             let _ = std::fs::remove_dir_all(temp_dir);
         });

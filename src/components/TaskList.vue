@@ -4,7 +4,6 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useFilterStore } from "../stores/filters.ts";
 import { useListStore } from "../stores/lists.ts";
 import { useTaskStore } from "../stores/tasks.ts";
-import { useUIStore } from "../stores/ui.ts";
 import {
 	compareByCompletion,
 	compareByDueDate,
@@ -21,7 +20,6 @@ import TaskSmartAddInput from "./TaskList/TaskSmartAddInput.vue";
 const listStore = useListStore();
 const taskStore = useTaskStore();
 const filterStore = useFilterStore();
-const _uiStore = useUIStore();
 
 const hasActiveSelection = computed(
 	() => !!listStore.activeList || !!listStore.activeView || !!filterStore.selectedTag,
@@ -78,8 +76,11 @@ const visibleTasks = computed(() => {
 		if (field === "due") return compareByDueDate(a, b, order);
 
 		if (field === "created_at") {
-			const ta = a.created_at ?? "";
-			const tb = b.created_at ?? "";
+			const ta = a.created_at;
+			const tb = b.created_at;
+			if (!ta && !tb) return 0;
+			if (!ta) return 1;
+			if (!tb) return -1;
 			return ta < tb ? -dir : ta > tb ? dir : 0;
 		}
 
@@ -184,6 +185,7 @@ watch(
 		<TaskListHeader
 			:active-sort-field="activeSortField"
 			:active-sort-order="activeSortOrder"
+			:visible-tasks="visibleTasks"
 			@change-sort="handleSortClick"
 		/>
 

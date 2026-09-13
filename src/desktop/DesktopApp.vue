@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, watch } from "vue";
 import CalendarView from "../components/CalendarView.vue";
+import FreeformView from "../components/FreeformView.vue";
+import BunnyCelebration from "../components/BunnyCelebration.vue";
 import CaptureModal from "../components/CaptureModal.vue";
 import CommandPaletteModal from "../components/CommandPaletteModal.vue";
 import GlobalHeader from "../components/GlobalHeader.vue";
@@ -10,7 +12,7 @@ import Sidebar from "../components/Sidebar.vue";
 import TaskDetail from "../components/TaskDetail.vue";
 import TaskList from "../components/TaskList.vue";
 import { useFilterStore } from "../stores/filters.ts";
-import { type DefaultView, useListStore } from "../stores/lists.ts";
+import { useListStore } from "../stores/lists.ts";
 import { useTagStore } from "../stores/tags.ts";
 import { useTaskStore } from "../stores/tasks.ts";
 import { useUIStore } from "../stores/ui.ts";
@@ -102,9 +104,10 @@ watch(
 				<Sidebar class="w-full h-full" />
 			</div>
 
-			<!-- Center Pane: Main Task List or Calendar (fills available space) -->
+			<!-- Center Pane: Active task view (fills available space) -->
 			<main class="flex-1 min-w-0 h-full flex flex-col">
-				<CalendarView v-if="uiStore.isCalendarView" class="flex-1 min-w-0 h-full" />
+				<CalendarView v-if="uiStore.viewMode === 'calendar'" class="flex-1 min-w-0 h-full" />
+				<FreeformView v-else-if="uiStore.viewMode === 'freeform'" class="flex-1 min-w-0 h-full" />
 				<TaskList v-else class="flex-1 min-w-0 h-full" />
 			</main>
 
@@ -130,5 +133,6 @@ watch(
 		<KeyboardShortcutsModal />
 		<CaptureModal />
 		<CommandPaletteModal />
+		<BunnyCelebration />
 	</div>
 </template>

@@ -151,7 +151,7 @@ describe("Remember the Milk import mapping", () => {
 		const childIndex = doc.tasks.findIndex((t) => t.id === "sub-1");
 		expect(parentIndex).toBeGreaterThanOrEqual(0);
 		expect(childIndex).toBeGreaterThan(parentIndex);
-		expect(doc.tasks[childIndex].parent_id).toBe("parent-1");
+		expect(doc.tasks[childIndex]?.parent_id).toBe("parent-1");
 
 		// Dangling parent sanitized to null
 		const orphan = doc.tasks.find((t) => t.id === "orphan-1");

@@ -106,7 +106,7 @@ mock.module("@tauri-apps/api/core", () => ({
 	},
 }));
 
-describe("Phase 8: Quick Actions, Keyboard Shortcuts & Polish", () => {
+describe("Optimistic Updates, Quick Actions & Keyboard Shortcuts", () => {
 	beforeEach(() => {
 		setActivePinia(createPinia());
 		mockTasks = [

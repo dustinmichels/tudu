@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use chrono::Utc;
 use libsql::{Connection, Row};
+use std::collections::HashMap;
 #[cfg(test)]
 use uuid::Uuid;
 
@@ -10,7 +10,7 @@ pub const LIST_SELECT_COLS: &str =
     "id, name, color, position, is_archived, icon, extra, created_at, updated_at, deleted_at";
 
 pub const TASK_SELECT_COLS: &str =
-    "id, uid, parent_id, list_id, title, description, due, is_all_day, rrule, priority, location, url, completed, completed_at, status, start, duration, timezone, percent_complete, color, position, geo_latitude, geo_longitude, extra, created_at, updated_at, deleted_at";
+    "id, uid, parent_id, list_id, title, description, due, is_all_day, rrule, priority, location, url, completed, completed_at, status, start, duration, timezone, percent_complete, color, position, freeform_x, freeform_y, geo_latitude, geo_longitude, extra, created_at, updated_at, deleted_at";
 
 pub const REMINDER_SELECT_COLS: &str =
     "id, task_id, trigger, relative_to, action, description, created_at, updated_at, deleted_at";
@@ -51,14 +51,28 @@ pub async fn fetch_tags_for_task_ids(
             .await
             .map_err(|e| format!("Failed to read tag row: {}", e))?
         {
-            let task_id: String = row.get(0).map_err(|e| format!("Failed to get task_id: {}", e))?;
+            let task_id: String = row
+                .get(0)
+                .map_err(|e| format!("Failed to get task_id: {}", e))?;
             let tag = Tag {
-                id: row.get(1).map_err(|e| format!("Failed to get tag id: {}", e))?,
-                name: row.get(2).map_err(|e| format!("Failed to get tag name: {}", e))?,
-                color: row.get(3).map_err(|e| format!("Failed to get tag color: {}", e))?,
-                created_at: row.get(4).map_err(|e| format!("Failed to get tag created_at: {}", e))?,
-                updated_at: row.get(5).map_err(|e| format!("Failed to get tag updated_at: {}", e))?,
-                deleted_at: row.get(6).map_err(|e| format!("Failed to get tag deleted_at: {}", e))?,
+                id: row
+                    .get(1)
+                    .map_err(|e| format!("Failed to get tag id: {}", e))?,
+                name: row
+                    .get(2)
+                    .map_err(|e| format!("Failed to get tag name: {}", e))?,
+                color: row
+                    .get(3)
+                    .map_err(|e| format!("Failed to get tag color: {}", e))?,
+                created_at: row
+                    .get(4)
+                    .map_err(|e| format!("Failed to get tag created_at: {}", e))?,
+                updated_at: row
+                    .get(5)
+                    .map_err(|e| format!("Failed to get tag updated_at: {}", e))?,
+                deleted_at: row
+                    .get(6)
+                    .map_err(|e| format!("Failed to get tag deleted_at: {}", e))?,
             };
             map.entry(task_id).or_default().push(tag);
         }
@@ -96,7 +110,7 @@ pub fn row_to_task(row: &Row) -> Result<Task, libsql::Error> {
             "needs_action".to_string()
         }
     });
-    let extra_str: Option<String> = row.get(23)?;
+    let extra_str: Option<String> = row.get(25)?;
     let extra = extra_str.and_then(|s| serde_json::from_str(&s).ok());
     Ok(Task {
         id: row.get(0)?,
@@ -120,13 +134,15 @@ pub fn row_to_task(row: &Row) -> Result<Task, libsql::Error> {
         percent_complete: row.get(18).unwrap_or(0),
         color: row.get(19)?,
         position: row.get(20).unwrap_or(0),
-        geo_latitude: row.get(21)?,
-        geo_longitude: row.get(22)?,
+        freeform_x: row.get(21)?,
+        freeform_y: row.get(22)?,
+        geo_latitude: row.get(23)?,
+        geo_longitude: row.get(24)?,
         extra,
         tags: Vec::new(),
-        created_at: row.get(24)?,
-        updated_at: row.get(25)?,
-        deleted_at: row.get(26)?,
+        created_at: row.get(26)?,
+        updated_at: row.get(27)?,
+        deleted_at: row.get(28)?,
     })
 }
 

@@ -12,6 +12,7 @@ import {
 	List,
 	Menu as MenuIcon,
 	Search,
+	StickyNote,
 	X,
 } from "lucide-vue-next";
 import { computed, onMounted, ref } from "vue";
@@ -147,40 +148,36 @@ const syncTooltip = computed(() => {
 
 		<!-- Right Section: View Mode, Sync Status & Menu -->
 		<div data-tauri-drag-region class="flex items-center gap-1.5 sm:gap-2 shrink-0">
-			<!-- View Mode Toggle: List vs Calendar -->
+			<!-- View Mode -->
 			<div
 				class="flex items-center rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-200/60 dark:bg-zinc-900/80 p-0.5 text-xs shadow-2xs"
 			>
 				<button
+					v-for="mode in [
+						{ id: 'list', label: 'List', icon: List, shortcut: '⌘L' },
+						{ id: 'calendar', label: 'Calendar', icon: CalendarDays, shortcut: '⌘C' },
+						{ id: 'freeform', label: 'Freeform', icon: StickyNote, shortcut: '⌘F' },
+					] as const"
+					:key="mode.id"
 					type="button"
-					@click="uiStore.setCalendarView(false)"
+					@click="uiStore.setViewMode(mode.id)"
 					:class="[
-						!uiStore.isCalendarView
+						uiStore.viewMode === mode.id
 							? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-2xs font-semibold'
 							: 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200',
 					]"
-					class="flex items-center gap-1 px-2 py-0.5 rounded-md transition-all cursor-pointer"
-					title="List view"
+					class="flex cursor-pointer items-center gap-1 rounded-md px-2 py-0.5 transition-all"
+					:title="`${mode.label} view (${mode.shortcut})`"
 				>
-					<List class="w-3.5 h-3.5" />
-					<span class="hidden md:inline">List</span>
-				</button>
-				<button
-					type="button"
-					@click="uiStore.setCalendarView(true)"
-					:class="[
-						uiStore.isCalendarView
-							? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-2xs font-semibold'
-							: 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200',
-					]"
-					class="flex items-center gap-1 px-2 py-0.5 rounded-md transition-all cursor-pointer"
-					title="Calendar view (⌘C)"
-				>
-					<CalendarDays
-						class="w-3.5 h-3.5"
-						:class="uiStore.isCalendarView ? 'text-teal-500' : ''"
+					<component
+						:is="mode.icon"
+						class="h-3.5 w-3.5"
+						:class="{
+							'text-teal-500': uiStore.viewMode === mode.id && mode.id === 'calendar',
+							'text-yellow-500': uiStore.viewMode === mode.id && mode.id === 'freeform',
+						}"
 					/>
-					<span class="hidden md:inline">Calendar</span>
+					<span class="hidden md:inline">{{ mode.label }}</span>
 				</button>
 			</div>
 

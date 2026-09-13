@@ -8,7 +8,7 @@ import { useUIStore } from "../stores/ui.ts";
 
 export interface ShortcutOptions {
 	onFocusQuickAdd?: () => void;
-	getVisibleTasks?: () => Task[];
+	getVisibleTasks?: () => (Task | string)[];
 }
 
 export function isEditingInput(target: EventTarget | null): boolean {
@@ -94,7 +94,6 @@ export function handleNavigationKey(
 	}
 
 	const isNext = !e.shiftKey;
-	const isPrev = e.shiftKey;
 
 	e.preventDefault();
 
@@ -186,15 +185,29 @@ export function handleGlobalShortcut(
 		return true;
 	}
 
-	// Cmd/Ctrl + C -> Toggle Calendar mode (when not editing input & no text selected)
+	// Cmd/Ctrl + L -> Switch to List view
+	if (isMod && !e.shiftKey && !e.altKey && (e.key === "l" || e.key === "L")) {
+		e.preventDefault();
+		uiStore.setViewMode("list");
+		return true;
+	}
+
+	// Cmd/Ctrl + C -> Switch to Calendar view (when not editing input & no text selected)
 	if (isMod && !e.shiftKey && !e.altKey && (e.key === "c" || e.key === "C")) {
 		const hasSelection =
 			typeof window !== "undefined" && (window.getSelection()?.toString().trim().length ?? 0) > 0;
 		if (!isEditing && !hasSelection) {
 			e.preventDefault();
-			uiStore.toggleCalendarView();
+			uiStore.setViewMode("calendar");
 			return true;
 		}
+	}
+
+	// Cmd/Ctrl + F -> Switch to Freeform view
+	if (isMod && !e.shiftKey && !e.altKey && (e.key === "f" || e.key === "F")) {
+		e.preventDefault();
+		uiStore.setViewMode("freeform");
+		return true;
 	}
 
 	// Cmd/Ctrl + B -> Toggle primary sidebar
@@ -227,11 +240,8 @@ export function handleGlobalShortcut(
 		return true;
 	}
 
-	// Cmd/Ctrl + F or '/' -> Focus search input
-	if (
-		(isMod && !e.shiftKey && (e.key === "f" || e.key === "F")) ||
-		(!isEditing && e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey)
-	) {
+	// '/' -> Focus search input
+	if (!isEditing && e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey) {
 		e.preventDefault();
 		if (typeof document !== "undefined") {
 			const searchInput = document.querySelector<HTMLInputElement>("input[data-global-search]");
@@ -278,26 +288,51 @@ export function handleGlobalShortcut(
 		(e.key === "k" || e.key === "ArrowUp") && !e.ctrlKey && !e.metaKey && !e.altKey;
 
 	if (isNextTask || isPrevTask) {
-		const tasks = options?.getVisibleTasks ? options.getVisibleTasks() : taskStore.tasks;
-		if (!tasks.length) return false;
+		let visibleIds: string[] = [];
+
+		if (options?.getVisibleTasks) {
+			visibleIds = options
+				.getVisibleTasks()
+				.map((t) => (typeof t === "string" ? t : t.id))
+				.filter(Boolean);
+		} else if (typeof document !== "undefined") {
+			const elements = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]"));
+			const domIds: string[] = [];
+			for (const el of elements) {
+				const id = el.getAttribute("data-task-id");
+				if (id && !domIds.includes(id)) {
+					domIds.push(id);
+				}
+			}
+			if (domIds.length > 0) {
+				visibleIds = domIds;
+			}
+		}
+
+		if (!visibleIds.length) {
+			const fallbackTasks = taskStore.tasks.filter((t) => !t.parent_id);
+			visibleIds = (fallbackTasks.length ? fallbackTasks : taskStore.tasks).map((t) => t.id);
+		}
+
+		if (!visibleIds.length) return false;
 		e.preventDefault();
 
 		const currentId = taskStore.activeTaskId;
-		const currentIndex = currentId ? tasks.findIndex((t) => t.id === currentId) : -1;
+		const currentIndex = currentId ? visibleIds.indexOf(currentId) : -1;
 
 		let nextIndex: number;
 		if (isNextTask) {
-			nextIndex = currentIndex === -1 ? 0 : Math.min(currentIndex + 1, tasks.length - 1);
+			nextIndex = currentIndex === -1 ? 0 : Math.min(currentIndex + 1, visibleIds.length - 1);
 		} else {
-			nextIndex = currentIndex === -1 ? tasks.length - 1 : Math.max(currentIndex - 1, 0);
+			nextIndex = currentIndex === -1 ? visibleIds.length - 1 : Math.max(currentIndex - 1, 0);
 		}
 
-		const nextTask = tasks[nextIndex];
-		if (nextTask) {
-			taskStore.setActiveTask(nextTask.id);
+		const nextId = visibleIds[nextIndex];
+		if (nextId) {
+			taskStore.setActiveTask(nextId);
 			uiStore.toggleDetail(true);
 			if (typeof document !== "undefined") {
-				const el = document.querySelector(`[data-task-id="${nextTask.id}"]`);
+				const el = document.querySelector(`[data-task-id="${nextId}"]`);
 				el?.scrollIntoView({ block: "nearest" });
 			}
 		}

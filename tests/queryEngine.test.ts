@@ -256,3 +256,235 @@ describe("Smart List Query Engine - queryTasks and getSmartListCounts", () => {
 		expect(counts.this_week).toEqual({ total: 5, incomplete: 3 });
 	});
 });
+
+describe("Smart List Query Engine - Date Predicates", () => {
+	const fixedNow = new Date(2026, 8, 10, 12, 0, 0); // Sept 10, 2026
+
+	test("parseDueDateToLocal handles YYYY-MM-DD and ISO formats", () => {
+		const d1 = parseDueDateToLocal("2026-09-10");
+		expect(d1?.getFullYear()).toBe(2026);
+		expect(d1?.getMonth()).toBe(8);
+		expect(d1?.getDate()).toBe(10);
+
+		const d2 = parseDueDateToLocal("2026-09-10T15:30:00Z");
+		expect(d2).not.toBeNull();
+
+		expect(parseDueDateToLocal(null)).toBeNull();
+		expect(parseDueDateToLocal("invalid-date")).toBeNull();
+	});
+
+	test("isOverdue matches dates strictly before today", () => {
+		expect(isOverdue("2026-09-08", fixedNow)).toBeTrue();
+		expect(isOverdue("2026-09-09", fixedNow)).toBeTrue();
+		expect(isOverdue("2026-09-10", fixedNow)).toBeFalse();
+		expect(isOverdue("2026-09-11", fixedNow)).toBeFalse();
+		expect(isOverdue(null, fixedNow)).toBeFalse();
+	});
+
+	test("isTodayOrOverdue includes overdue and today but not future", () => {
+		expect(isTodayOrOverdue("2026-09-08", fixedNow)).toBeTrue();
+		expect(isTodayOrOverdue("2026-09-09", fixedNow)).toBeTrue();
+		expect(isTodayOrOverdue("2026-09-10", fixedNow)).toBeTrue();
+		expect(isTodayOrOverdue("2026-09-11", fixedNow)).toBeFalse();
+		expect(isTodayOrOverdue("2026-09-20", fixedNow)).toBeFalse();
+		expect(isTodayOrOverdue(null, fixedNow)).toBeFalse();
+	});
+
+	test("isTomorrow matches exactly tomorrow's date", () => {
+		expect(isTomorrow("2026-09-10", fixedNow)).toBeFalse();
+		expect(isTomorrow("2026-09-11", fixedNow)).toBeTrue();
+		expect(isTomorrow("2026-09-12", fixedNow)).toBeFalse();
+		expect(isTomorrow(null, fixedNow)).toBeFalse();
+	});
+
+	test("isThisWeek matches tasks within the next 7 days", () => {
+		expect(isThisWeek("2026-09-10", fixedNow)).toBeTrue();
+		expect(isThisWeek("2026-09-11", fixedNow)).toBeTrue();
+		expect(isThisWeek("2026-09-17", fixedNow)).toBeTrue(); // 7 days ahead
+		expect(isThisWeek("2026-09-18", fixedNow)).toBeFalse(); // 8 days ahead
+		expect(isThisWeek(null, fixedNow)).toBeFalse();
+	});
+});
+
+describe("Smart List Query Engine - View Matching", () => {
+	const fixedNow = new Date(2026, 8, 10, 12, 0, 0); // Sept 10, 2026
+
+	test("Overdue smart list matches incomplete tasks strictly before today", () => {
+		const overdueIncomplete = makeTask({ due: "2026-09-08", completed: false });
+		const overdueCompleted = makeTask({ due: "2026-09-08", completed: true });
+		const todayTask = makeTask({ due: "2026-09-10", completed: false });
+		const futureTask = makeTask({ due: "2026-09-15", completed: false });
+		const deletedOverdue = makeTask({
+			due: "2026-09-08",
+			completed: false,
+			deleted_at: "2026-09-09T00:00:00Z",
+		});
+
+		expect(matchesSmartView(overdueIncomplete, "overdue", { now: fixedNow })).toBeTrue();
+		expect(matchesSmartView(overdueCompleted, "overdue", { now: fixedNow })).toBeFalse();
+		expect(matchesSmartView(todayTask, "overdue", { now: fixedNow })).toBeFalse();
+		expect(matchesSmartView(futureTask, "overdue", { now: fixedNow })).toBeFalse();
+		expect(matchesSmartView(deletedOverdue, "overdue", { now: fixedNow })).toBeFalse();
+	});
+
+	test("Inbox matches tasks in the inbox list", () => {
+		const inboxTask = makeTask({ list_id: "inbox-id" });
+		const workTask = makeTask({ list_id: "work-id" });
+
+		expect(matchesSmartView(inboxTask, "inbox", { inboxListId: "inbox-id" })).toBeTrue();
+		expect(matchesSmartView(workTask, "inbox", { inboxListId: "inbox-id" })).toBeFalse();
+	});
+
+	test("All Tasks matches all non-deleted tasks", () => {
+		const activeTask = makeTask({ deleted_at: null });
+		const deletedTask = makeTask({ deleted_at: "2026-09-09T00:00:00Z" });
+
+		expect(matchesSmartView(activeTask, "all")).toBeTrue();
+		expect(matchesSmartView(deletedTask, "all")).toBeFalse();
+	});
+
+	test("Trash smart list matches soft-deleted tasks exclusively", () => {
+		const activeTask = makeTask({ deleted_at: null });
+		const deletedTask = makeTask({ deleted_at: "2026-09-09T00:00:00Z" });
+
+		expect(matchesSmartView(deletedTask, "trash")).toBeTrue();
+		expect(matchesSmartView(activeTask, "trash")).toBeFalse();
+
+		// Non-trash views reject soft-deleted tasks
+		expect(matchesSmartView(deletedTask, "today", { now: fixedNow })).toBeFalse();
+		expect(matchesSmartView(deletedTask, "inbox", { inboxListId: "list-default" })).toBeFalse();
+	});
+});
+
+describe("Smart List Query Engine - Collection Queries", () => {
+	const fixedNow = new Date(2026, 8, 10, 12, 0, 0); // Sept 10, 2026
+
+	test("querySmartList filters collection by smart view", () => {
+		const tasks: Task[] = [
+			makeTask({ id: "0", list_id: "work-id", due: "2026-09-08", completed: false }), // Overdue
+			makeTask({ id: "1", list_id: "inbox-id", due: "2026-09-10" }), // Inbox, Today, This Week
+			makeTask({ id: "2", list_id: "work-id", due: "2026-09-11" }), // Tomorrow, This Week
+			makeTask({ id: "3", list_id: "work-id", due: "2026-09-25" }), // Future
+			makeTask({ id: "4", deleted_at: "2026-09-01T00:00:00Z" }), // Trash
+		];
+
+		const overdueResults = querySmartList(tasks, "overdue", { now: fixedNow });
+		expect(overdueResults.map((t) => t.id)).toEqual(["0"]);
+
+		const inboxResults = querySmartList(tasks, "inbox", {
+			inboxListId: "inbox-id",
+		});
+		expect(inboxResults.map((t) => t.id)).toEqual(["1"]);
+
+		const todayResults = querySmartList(tasks, "today", { now: fixedNow });
+		expect(todayResults.map((t) => t.id)).toEqual(["0", "1"]);
+
+		const tomorrowResults = querySmartList(tasks, "tomorrow", {
+			now: fixedNow,
+		});
+		expect(tomorrowResults.map((t) => t.id)).toEqual(["2"]);
+
+		const thisWeekResults = querySmartList(tasks, "this_week", {
+			now: fixedNow,
+		});
+		expect(thisWeekResults.map((t) => t.id)).toEqual(["0", "1", "2"]);
+
+		const allResults = querySmartList(tasks, "all");
+		expect(allResults.map((t) => t.id)).toEqual(["0", "1", "2", "3"]);
+
+		const trashResults = querySmartList(tasks, "trash");
+		expect(trashResults.map((t) => t.id)).toEqual(["4"]);
+	});
+
+	test("getSmartListCounts calculates incomplete and total counts accurately", () => {
+		const tasks: Task[] = [
+			makeTask({
+				id: "1",
+				list_id: "inbox-id",
+				due: "2026-09-10",
+				completed: false,
+			}),
+			makeTask({
+				id: "2",
+				list_id: "inbox-id",
+				due: "2026-09-10",
+				completed: true,
+			}),
+			makeTask({
+				id: "3",
+				list_id: "work-id",
+				due: "2026-09-11",
+				completed: false,
+			}),
+			makeTask({
+				id: "4",
+				deleted_at: "2026-09-01T00:00:00Z",
+				completed: false,
+			}),
+			makeTask({
+				id: "5",
+				list_id: "work-id",
+				due: "2026-09-08",
+				completed: false,
+			}),
+		];
+
+		const counts = getSmartListCounts(tasks, {
+			inboxListId: "inbox-id",
+			now: fixedNow,
+		});
+
+		expect(counts.inbox).toEqual({ total: 2, incomplete: 1 });
+		expect(counts.today).toEqual({ total: 3, incomplete: 2 });
+		expect(counts.tomorrow).toEqual({ total: 1, incomplete: 1 });
+		expect(counts.this_week).toEqual({ total: 4, incomplete: 3 });
+		expect(counts.all).toEqual({ total: 4, incomplete: 3 });
+		expect(counts.trash).toEqual({ total: 1, incomplete: 1 });
+		expect(counts.overdue).toEqual({ total: 1, incomplete: 1 });
+	});
+
+	test("queryTasks combines filters, search query, and sorting", () => {
+		const tasks: Task[] = [
+			makeTask({
+				id: "1",
+				title: "Buy milk",
+				due: "2026-09-10",
+				priority: 1,
+				completed: false,
+			}),
+			makeTask({
+				id: "2",
+				title: "Read book",
+				due: "2026-09-10",
+				priority: 3,
+				completed: false,
+			}),
+			makeTask({
+				id: "3",
+				title: "Buy groceries",
+				due: "2026-09-10",
+				priority: 2,
+				completed: true,
+			}),
+			makeTask({
+				id: "4",
+				title: "Write code",
+				due: "2026-09-20",
+				priority: 1,
+				completed: false,
+			}),
+		];
+
+		// Filter incomplete tasks matching "buy" sorted by priority
+		const result = queryTasks(tasks, {
+			smartView: "today",
+			completion: "incomplete",
+			searchQuery: "buy",
+			sort: { field: "priority", order: "asc" },
+			now: fixedNow,
+		});
+
+		expect(result.length).toBe(1);
+		expect(result[0]?.title).toBe("Buy milk");
+	});
+});

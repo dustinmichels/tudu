@@ -40,7 +40,7 @@ function makeTask(partial: Partial<Task>): Task {
 	};
 }
 
-describe("Phase 5: Left Sidebar (Navigation & Lists)", () => {
+describe("Left Sidebar (Navigation & Lists)", () => {
 	beforeEach(() => {
 		setActivePinia(createPinia());
 	});
@@ -175,6 +175,8 @@ describe("Phase 5: Left Sidebar (Navigation & Lists)", () => {
 					created_at: "2026-09-10T00:00:00Z",
 					updated_at: "2026-09-10T00:00:00Z",
 					deleted_at: null,
+					task_count: 0,
+					taskCount: 0,
 				},
 				{
 					id: "tag-2",
@@ -183,6 +185,8 @@ describe("Phase 5: Left Sidebar (Navigation & Lists)", () => {
 					created_at: "2026-09-10T00:00:00Z",
 					updated_at: "2026-09-10T00:00:00Z",
 					deleted_at: null,
+					task_count: 0,
+					taskCount: 0,
 				},
 			];
 
@@ -191,17 +195,17 @@ describe("Phase 5: Left Sidebar (Navigation & Lists)", () => {
 				{
 					...makeTask({ id: "t1", completed: false }),
 					tags: ["frontend", "urgent"],
-				} as Task,
+				} as unknown as Task,
 				// Active task with object tags
 				{
 					...makeTask({ id: "t2", completed: false }),
 					tags: [{ id: "tag-1", name: "frontend" }],
-				} as Task,
+				} as unknown as Task,
 				// Completed task with tag
 				{
 					...makeTask({ id: "t3", completed: true }),
 					tags: ["urgent"],
-				} as Task,
+				} as unknown as Task,
 			];
 
 			const tags = tagStore.tagsWithCounts;

@@ -99,7 +99,7 @@ describe("Smart Add Parser and Helpers", () => {
 		it("suggests due dates matching query", () => {
 			const suggestions = getDueSuggestions("tom", fixedBase);
 			expect(suggestions.length).toBeGreaterThan(0);
-			expect(suggestions[0].insertValue).toBe("tomorrow");
+			expect(suggestions[0]?.insertValue).toBe("tomorrow");
 		});
 
 		it("suggests priorities", () => {

@@ -15,9 +15,11 @@ A fast, keyboard-first, local-first personal task manager inspired by Remember T
   - `d`: Postpone task by 1 day
   - `n` or `/`: Focus quick-add input with smart parsing (`#tag`, `^due`, `!p1`)
   - `⌘K` / `⌘⇧P`: Global Command Palette
-  - `⌘C`: Toggle List and Calendar views
+  - `⌘L`: Switch to List view
+  - `⌘C`: Switch to Calendar view
+  - `⌘F`: Switch to Freeform view
   - `?`: Open keyboard shortcuts reference
-- **Multiple Views**: Seamlessly switch between the primary **List View** and an interactive monthly **Calendar View**.
+- **Multiple Views**: Seamlessly switch between the primary **List View**, interactive monthly **Calendar View**, and **Freeform View**.
 - **Data Portability**: Full backup export and import adhering to the open **OpenTask v1.0** format, plus a dedicated Remember The Milk (RTM) JSON import mapper.
 - **Local-First & Private**: Data is stored locally in an embedded libSQL/SQLite database using WAL mode and transactional safety.
 

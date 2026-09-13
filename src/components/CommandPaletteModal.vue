@@ -8,6 +8,7 @@ import {
 	Folder,
 	Inbox,
 	Keyboard,
+	List,
 	ListFilter,
 	ListTree,
 	PanelLeft,
@@ -15,6 +16,7 @@ import {
 	Plus,
 	RotateCcw,
 	Search,
+	StickyNote,
 	Tag as TagIcon,
 	Trash2,
 	Upload,
@@ -260,13 +262,33 @@ const commands = computed<CommandItem[]>(() => {
 			},
 		},
 		{
-			id: "action-toggle-calendar",
-			title: uiStore.isCalendarView ? "Switch to List View" : "Switch to Calendar View",
+			id: "action-view-list",
+			title: "Switch to List View",
+			category: "View",
+			shortcut: "Cmd+L",
+			icon: List,
+			action: () => {
+				uiStore.setViewMode("list");
+			},
+		},
+		{
+			id: "action-view-calendar",
+			title: "Switch to Calendar View",
 			category: "View",
 			shortcut: "Cmd+C",
 			icon: CalendarDays,
 			action: () => {
-				uiStore.toggleCalendarView();
+				uiStore.setViewMode("calendar");
+			},
+		},
+		{
+			id: "action-view-freeform",
+			title: "Switch to Freeform View",
+			category: "View",
+			shortcut: "Cmd+F",
+			icon: StickyNote,
+			action: () => {
+				uiStore.setViewMode("freeform");
 			},
 		},
 		{
@@ -346,7 +368,6 @@ const commands = computed<CommandItem[]>(() => {
 			id: `goto-view-${sv.id}`,
 			title: `Go to ${sv.name}`,
 			category: "Go to View",
-			shortcut: sv.shortcut,
 			icon: sv.icon,
 			action: () => {
 				filterStore.setTagFilter(null);

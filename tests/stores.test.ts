@@ -23,6 +23,30 @@ import { ApiError, api } from "../src/services/api.ts";
 import { useListStore } from "../src/stores/lists.ts";
 import { useTagStore } from "../src/stores/tags.ts";
 import { useTaskStore } from "../src/stores/tasks.ts";
+import { useFilterStore } from "../src/stores/filters.ts";
+
+function makeTask(overrides: Partial<Task> = {}): Task {
+	return {
+		id: overrides.id ?? `t-${Math.random().toString(36).slice(2, 8)}`,
+		uid: null,
+		parent_id: null,
+		list_id: "list-default",
+		title: "Sample Task",
+		description: null,
+		due: null,
+		is_all_day: false,
+		rrule: null,
+		priority: null,
+		location: null,
+		url: null,
+		completed: false,
+		completed_at: null,
+		created_at: "2026-01-01T00:00:00Z",
+		updated_at: "2026-01-01T00:00:00Z",
+		deleted_at: null,
+		...overrides,
+	};
+}
 
 describe("API Service", () => {
 	beforeEach(() => {
@@ -745,5 +769,155 @@ describe("Pinia Tag Store (useTagStore)", () => {
 		expect(created.task_count).toBe(0);
 		expect(tagStore.tags.length).toBe(1);
 		expect(tagStore.tagsWithCounts[0]?.taskCount).toBe(0);
+	});
+});
+
+describe("Pinia Filter Store (useFilterStore)", () => {
+	beforeEach(() => {
+		setActivePinia(createPinia());
+	});
+
+	test("initializes with default filter values", () => {
+		const filterStore = useFilterStore();
+		expect(filterStore.selectedListId).toBeNull();
+		expect(filterStore.selectedTag).toBeNull();
+		expect(filterStore.smartView).toBeNull();
+		expect(filterStore.includeCompleted).toBeTrue();
+		expect(filterStore.searchQuery).toBe("");
+		expect(filterStore.sortBy).toBe("priority");
+		expect(filterStore.sortOrder).toBe("asc");
+		expect(filterStore.hasActiveFilter).toBeFalse();
+		expect(filterStore.activeFilterType).toBe("none");
+	});
+
+	test("setting list filter updates activeFilterType and clears smartView", () => {
+		const filterStore = useFilterStore();
+		filterStore.setSmartView("today");
+		expect(filterStore.smartView).toBe("today");
+
+		filterStore.setListFilter("list-work");
+		expect(filterStore.selectedListId).toBe("list-work");
+		expect(filterStore.smartView).toBeNull();
+		expect(filterStore.activeFilterType).toBe("list");
+		expect(filterStore.hasActiveFilter).toBeTrue();
+	});
+
+	test("setting smart view updates activeFilterType and clears selectedListId", () => {
+		const filterStore = useFilterStore();
+		filterStore.setListFilter("list-work");
+		expect(filterStore.selectedListId).toBe("list-work");
+
+		filterStore.setSmartView("tomorrow");
+		expect(filterStore.smartView).toBe("tomorrow");
+		expect(filterStore.selectedListId).toBeNull();
+		expect(filterStore.activeFilterType).toBe("smart_view");
+		expect(filterStore.isSmartViewActive("tomorrow")).toBeTrue();
+		expect(filterStore.isSmartViewActive("today")).toBeFalse();
+	});
+
+	test("tag filter and search query can be set and reset", () => {
+		const filterStore = useFilterStore();
+		filterStore.setTagFilter("urgent");
+		expect(filterStore.selectedTag).toBe("urgent");
+
+		filterStore.setSearchQuery("groceries");
+		expect(filterStore.searchQuery).toBe("groceries");
+		expect(filterStore.hasActiveFilter).toBeTrue();
+
+		filterStore.resetFilters();
+		expect(filterStore.selectedTag).toBeNull();
+		expect(filterStore.searchQuery).toBe("");
+		expect(filterStore.hasActiveFilter).toBeFalse();
+	});
+
+	test("toggleIncludeCompleted flips completion visibility", () => {
+		const filterStore = useFilterStore();
+		expect(filterStore.includeCompleted).toBeTrue();
+
+		const next1 = filterStore.toggleIncludeCompleted();
+		expect(next1).toBeFalse();
+		expect(filterStore.includeCompleted).toBeFalse();
+
+		const next2 = filterStore.toggleIncludeCompleted();
+		expect(next2).toBeTrue();
+		expect(filterStore.includeCompleted).toBeTrue();
+	});
+
+	test("setSorting updates sorting field and order", () => {
+		const filterStore = useFilterStore();
+		filterStore.setSorting("due", "desc");
+		expect(filterStore.sortBy).toBe("due");
+		expect(filterStore.sortOrder).toBe("desc");
+		expect(filterStore.sortOptions).toEqual({
+			field: "due",
+			order: "desc",
+			completedToEnd: true,
+		});
+	});
+});
+
+describe("Task Store Smart Lists and Reactive Integration", () => {
+	beforeEach(() => {
+		setActivePinia(createPinia());
+	});
+
+	test("taskStore exposes reactive smart lists and counts", () => {
+		const listStore = useListStore();
+		listStore.lists = [
+			{
+				id: "inbox-1",
+				name: "Inbox",
+				color: null,
+				position: 0,
+				created_at: "2026-01-01",
+				updated_at: "2026-01-01",
+				deleted_at: null,
+			},
+		];
+
+		const taskStore = useTaskStore();
+		const todayStr = new Date().toISOString().slice(0, 10);
+		const tomorrowDate = new Date();
+		tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+		const tomorrowStr = tomorrowDate.toISOString().slice(0, 10);
+		const yesterdayDate = new Date();
+		yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+		const yesterdayStr = yesterdayDate.toISOString().slice(0, 10);
+
+		taskStore.allTasks = [
+			makeTask({ id: "t-inbox", list_id: "inbox-1", completed: false }),
+			makeTask({
+				id: "t-today",
+				list_id: "inbox-1",
+				due: todayStr,
+				completed: false,
+			}),
+			makeTask({
+				id: "t-tomorrow",
+				list_id: "other",
+				due: tomorrowStr,
+				completed: false,
+			}),
+			makeTask({
+				id: "t-overdue",
+				list_id: "other",
+				due: yesterdayStr,
+				completed: false,
+			}),
+			makeTask({ id: "t-deleted", deleted_at: "2026-01-01T00:00:00Z" }),
+		];
+
+		expect(taskStore.inboxTasks.length).toBe(2);
+		expect(taskStore.todayTasks.length).toBe(2);
+		expect(taskStore.tomorrowTasks.length).toBe(1);
+		expect(taskStore.overdueTasks.length).toBe(1);
+		expect(taskStore.allTasksList.length).toBe(4);
+		expect(taskStore.trashTasks.length).toBe(1);
+
+		expect(taskStore.countInbox).toBe(2);
+		expect(taskStore.countToday).toBe(2);
+		expect(taskStore.countTomorrow).toBe(1);
+		expect(taskStore.countOverdue).toBe(1);
+		expect(taskStore.countTrash).toBe(1);
 	});
 });

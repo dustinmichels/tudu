@@ -48,6 +48,10 @@ pub struct Task {
     #[serde(default)]
     pub position: i64,
     #[serde(default)]
+    pub freeform_x: Option<f64>,
+    #[serde(default)]
+    pub freeform_y: Option<f64>,
+    #[serde(default)]
     pub geo_latitude: Option<f64>,
     #[serde(default)]
     pub geo_longitude: Option<f64>,
@@ -121,6 +125,10 @@ pub struct UpdateTaskInput {
     pub color: Option<Option<String>>,
     #[serde(default)]
     pub position: Option<i64>,
+    #[serde(default, alias = "freeformX")]
+    pub freeform_x: Option<f64>,
+    #[serde(default, alias = "freeformY")]
+    pub freeform_y: Option<f64>,
     #[serde(default, alias = "geoLatitude", deserialize_with = "double_option")]
     pub geo_latitude: Option<Option<f64>>,
     #[serde(default, alias = "geoLongitude", deserialize_with = "double_option")]
@@ -376,7 +384,10 @@ pub fn priority_to_opentask(p: Option<i64>) -> String {
     }
 }
 
-pub fn opentask_to_priority(priority: &str, priority_raw: Option<&serde_json::Value>) -> Option<i64> {
+pub fn opentask_to_priority(
+    priority: &str,
+    priority_raw: Option<&serde_json::Value>,
+) -> Option<i64> {
     if let Some(raw) = priority_raw {
         if let Some(n) = raw.as_i64() {
             if (1..=3).contains(&n) {
@@ -450,7 +461,8 @@ mod tests {
             "geo": { "latitude": 37.77, "longitude": -122.41 },
             "percentComplete": 75
         }"#;
-        let parsed: UpdateTaskInput = serde_json::from_str(json_data).expect("parse UpdateTaskInput");
+        let parsed: UpdateTaskInput =
+            serde_json::from_str(json_data).expect("parse UpdateTaskInput");
         assert_eq!(parsed.id, "t1");
         assert_eq!(parsed.title, Some("New Title".to_string()));
         assert_eq!(parsed.due, Some(None)); // explicitly null

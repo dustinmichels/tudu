@@ -21,14 +21,12 @@ import type { Task } from "../models/index.ts";
 import { parseDueDateToLocal } from "../services/queryEngine.ts";
 import { useFilterStore } from "../stores/filters.ts";
 import { useListStore } from "../stores/lists.ts";
-import { useTagStore } from "../stores/tags.ts";
 import { useTaskStore } from "../stores/tasks.ts";
 import { useUIStore } from "../stores/ui.ts";
 import { getListIcon } from "../utils/icons.ts";
 
 const filterStore = useFilterStore();
 const listStore = useListStore();
-const tagStore = useTagStore();
 const taskStore = useTaskStore();
 const uiStore = useUIStore();
 
@@ -415,6 +413,7 @@ onMounted(async () => {
 					<button
 						v-for="task in cell.tasks.slice(0, 3)"
 						:key="task.id"
+						:data-task-id="task.id"
 						type="button"
 						:class="chipClass(task)"
 						:title="task.title"

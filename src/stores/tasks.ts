@@ -27,6 +27,7 @@ import { type SortOptions, sortTasks } from "../utils/sorting.ts";
 import { useFilterStore } from "./filters.ts";
 import { useListStore } from "./lists.ts";
 import { useTagStore } from "./tags.ts";
+import { useUIStore } from "./ui.ts";
 
 export {
 	isOverdue,
@@ -286,6 +287,14 @@ export const useTaskStore = defineStore("tasks", () => {
 
 		applyCompletion(nextCompleted, nextCompleted ? now : null);
 
+		if (nextCompleted) {
+			try {
+				useUIStore().triggerTaskCompletionAnimation();
+			} catch {
+				// Safe fallback in non-store test environments
+			}
+		}
+
 		const seq = (taskMutationSeq.get(id) ?? 0) + 1;
 		taskMutationSeq.set(id, seq);
 
@@ -372,7 +381,9 @@ export const useTaskStore = defineStore("tasks", () => {
 				if (state.timer !== null) {
 					globalThis.clearTimeout(state.timer);
 				}
-				state.timer = globalThis.setTimeout(() => {
+				// Tauri webview scheduler: browser contract returns a numeric handle.
+				// `globalThis` (not `window`) keeps this runnable under the Bun test runtime.
+				state.timer = (globalThis.setTimeout as Window["setTimeout"])(() => {
 					state.timer = null;
 					processDebounceQueue(id).catch((err) => {
 						error.value = err instanceof Error ? err.message : String(err);
@@ -541,6 +552,13 @@ export const useTaskStore = defineStore("tasks", () => {
 		error.value = null;
 		try {
 			const updated = await apiBatchUpdateTasks(options);
+			if (options.completed) {
+				try {
+					useUIStore().triggerTaskCompletionAnimation();
+				} catch {
+					// Safe fallback in non-store test environments
+				}
+			}
 			const updatedMap = new Map(updated.map((t) => [t.id, t]));
 			allTasks.value = allTasks.value.map((t) => updatedMap.get(t.id) ?? t);
 			// Re-fetch current view / list to reconcile membership accurately

@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { ref, watch } from "vue";
+import { useTaskStore } from "./tasks.ts";
 
 export const useUIStore = defineStore("ui", () => {
 	const isSidebarOpen = ref(false); // Mobile drawer state
@@ -10,14 +11,32 @@ export const useUIStore = defineStore("ui", () => {
 	const isCommandPaletteOpen = ref(false); // Global command palette / control panel
 	const commandPaletteInitialMode = ref<"commands" | "lists">("commands");
 	const syncStatus = ref<"synced" | "syncing" | "offline" | "error">("offline");
-	const isCalendarView = ref(false); // Toggle mode for list vs calendar view
+	const viewMode = ref<"list" | "calendar" | "freeform">("list");
 
-	function toggleCalendarView(open?: boolean) {
-		isCalendarView.value = open !== undefined ? open : !isCalendarView.value;
+	function onSwitchView() {
+		isDetailOpen.value = false;
+		useTaskStore().setActiveTask(null);
 	}
 
-	function setCalendarView(open: boolean) {
-		isCalendarView.value = open;
+	watch(
+		viewMode,
+		(newMode, oldMode) => {
+			if (newMode !== oldMode) {
+				onSwitchView();
+			}
+		},
+		{ flush: "sync" },
+	);
+
+	function toggleCalendarView() {
+		setViewMode(viewMode.value === "calendar" ? "list" : "calendar");
+	}
+
+	function setViewMode(mode: "list" | "calendar" | "freeform") {
+		if (viewMode.value !== mode) {
+			viewMode.value = mode;
+			onSwitchView();
+		}
 	}
 
 	function toggleSidebar(open?: boolean) {
@@ -94,6 +113,26 @@ export const useUIStore = defineStore("ui", () => {
 		}
 	}
 
+	const isBunnyVisible = ref(false);
+	const bunnyAnimationKey = ref(0);
+	let bunnyTimer: number | undefined = undefined;
+
+	function triggerTaskCompletionAnimation() {
+		bunnyAnimationKey.value++;
+		isBunnyVisible.value = true;
+		clearTimeout(bunnyTimer);
+		bunnyTimer = globalThis.setTimeout(() => {
+			isBunnyVisible.value = false;
+			bunnyTimer = undefined;
+		}, 2500) as unknown as number;
+	}
+
+	function hideBunny() {
+		clearTimeout(bunnyTimer);
+		bunnyTimer = undefined;
+		isBunnyVisible.value = false;
+	}
+
 	return {
 		isSidebarOpen,
 		isDetailOpen,
@@ -115,8 +154,12 @@ export const useUIStore = defineStore("ui", () => {
 		toggleSubtasksInline,
 		isTaskSubtasksExpanded,
 		toggleTaskSubtasks,
-		isCalendarView,
+		viewMode,
 		toggleCalendarView,
-		setCalendarView,
+		setViewMode,
+		isBunnyVisible,
+		bunnyAnimationKey,
+		triggerTaskCompletionAnimation,
+		hideBunny,
 	};
 });

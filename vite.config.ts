@@ -1,4 +1,3 @@
-// @ts-expect-error type error without @types/node package
 import process from "node:process";
 import tailwindcss from "@tailwindcss/vite";
 import vue from "@vitejs/plugin-vue";

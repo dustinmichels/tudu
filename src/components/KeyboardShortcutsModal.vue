@@ -45,7 +45,9 @@ interface ShortcutCategory {
 const essentialShortcuts: Shortcut[] = [
 	{ keys: ["⌘", "N"], description: "Quick Capture (new task modal)" },
 	{ keys: ["⌘", "Shift", "P"], description: "Open Command Palette" },
-	{ keys: ["⌘", "C"], description: "Toggle Calendar view mode" },
+	{ keys: ["⌘", "L"], description: "Switch to List view" },
+	{ keys: ["⌘", "C"], description: "Switch to Calendar view" },
+	{ keys: ["⌘", "F"], description: "Switch to Freeform view" },
 	{ keys: ["t"], description: "Focus inline add input (current list/view)" },
 	{ keys: ["j", "or", "↓"], description: "Select next task" },
 	{ keys: ["k", "or", "↑"], description: "Select previous task" },
@@ -77,8 +79,16 @@ const shortcutCategories: ShortcutCategory[] = [
 		title: "View & Layout (Zed / VS Code)",
 		shortcuts: [
 			{
+				keys: ["⌘", "L"],
+				description: "Switch to List view",
+			},
+			{
 				keys: ["⌘", "C"],
-				description: "Toggle Calendar view mode",
+				description: "Switch to Calendar view",
+			},
+			{
+				keys: ["⌘", "F"],
+				description: "Switch to Freeform view",
 			},
 			{
 				keys: ["⌘", "B"],
@@ -118,7 +128,7 @@ const shortcutCategories: ShortcutCategory[] = [
 				description: "Select previous task in list",
 			},
 			{
-				keys: ["/", "or", "⌘F"],
+				keys: ["/"],
 				description: "Focus search bar",
 			},
 			{

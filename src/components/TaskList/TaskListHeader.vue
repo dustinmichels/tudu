@@ -5,7 +5,9 @@ import {
 	ArrowUp,
 	Calendar,
 	CalendarRange,
+	Check,
 	CheckSquare,
+	Copy,
 	Inbox,
 	ListFilter,
 	ListTree,
@@ -16,20 +18,23 @@ import {
 	Tag as TagIcon,
 	Trash2,
 } from "lucide-vue-next";
-import { computed, ref } from "vue";
+import { computed, onUnmounted, ref } from "vue";
+import type { Task } from "../../models/index.ts";
 import { useFilterStore } from "../../stores/filters.ts";
 import { useListStore } from "../../stores/lists.ts";
 import { useTaskStore } from "../../stores/tasks.ts";
 import { useUIStore } from "../../stores/ui.ts";
 import { DEFAULT_LIST_ICON, getListIcon } from "../../utils/icons.ts";
+import { copyToClipboard, formatTasksAsMarkdown } from "../../utils/markdown.ts";
 import type { SortOrder } from "../../utils/sorting.ts";
 import IconPickerPopover from "../IconPickerPopover.vue";
 
 export type SortFieldOption = "created_at" | "priority" | "due" | "list" | "tags";
 
-defineProps<{
+const props = defineProps<{
 	activeSortField: SortFieldOption | null;
 	activeSortOrder: SortOrder;
+	visibleTasks?: Task[];
 }>();
 
 const emit = defineEmits<{
@@ -83,6 +88,28 @@ async function handleHeaderIconSelected(iconName: string) {
 		}
 	}
 }
+const copied = ref(false);
+let copyTimeout: ReturnType<typeof setTimeout> | null = null;
+
+async function handleCopyList() {
+	const tasksToCopy = props.visibleTasks ?? taskStore.rootTasks ?? taskStore.tasks;
+	const markdown = formatTasksAsMarkdown(tasksToCopy, listStore.sortedLists, {
+		allTasks: taskStore.allTasks,
+		includeCompleted: taskStore.includeCompleted,
+	});
+	const success = await copyToClipboard(markdown);
+	if (success) {
+		copied.value = true;
+		if (copyTimeout) clearTimeout(copyTimeout);
+		copyTimeout = setTimeout(() => {
+			copied.value = false;
+		}, 2000);
+	}
+}
+
+onUnmounted(() => {
+	if (copyTimeout) clearTimeout(copyTimeout);
+});
 </script>
 
 <template>
@@ -162,6 +189,25 @@ async function handleHeaderIconSelected(iconName: string) {
 
 		<!-- Right actions: Completed filter toggle, Subtasks toggle, Detail panel toggle -->
 		<div class="flex items-center gap-1.5 shrink-0">
+			<!-- Copy list to clipboard as Markdown -->
+			<button
+				v-if="hasActiveSelection"
+				type="button"
+				@click="handleCopyList"
+				:class="[
+					'flex items-center gap-1 text-xs px-2 sm:px-2.5 py-1 rounded-md border transition-colors cursor-pointer',
+					copied
+						? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 font-medium'
+						: 'border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300',
+				]"
+				:title="copied ? 'Copied list to clipboard!' : 'Copy list as Markdown'"
+				data-copy-list-button
+			>
+				<Check v-if="copied" class="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+				<Copy v-else class="w-3.5 h-3.5" />
+				<span class="hidden sm:inline">{{ copied ? "Copied!" : "Copy" }}</span>
+			</button>
+
 			<button
 				v-if="hasActiveSelection"
 				type="button"

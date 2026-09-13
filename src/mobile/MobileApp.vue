@@ -1,17 +1,16 @@
 <script setup lang="ts">
 import { Calendar, FolderKanban, Inbox, Plus, Settings } from "lucide-vue-next";
+import BunnyCelebration from "../components/BunnyCelebration.vue";
 import { onMounted, ref } from "vue";
 import { useFilterStore } from "../stores/filters.ts";
 import { useListStore } from "../stores/lists.ts";
 import { useTagStore } from "../stores/tags.ts";
 import { useTaskStore } from "../stores/tasks.ts";
-import { useUIStore } from "../stores/ui.ts";
 
 const filterStore = useFilterStore();
 const listStore = useListStore();
 const tagStore = useTagStore();
 const taskStore = useTaskStore();
-const uiStore = useUIStore();
 
 type MobileTab = "inbox" | "today" | "lists" | "settings";
 const activeTab = ref<MobileTab>("inbox");
@@ -148,5 +147,6 @@ onMounted(async () => {
 				</button>
 			</div>
 		</nav>
+		<BunnyCelebration />
 	</div>
 </template>

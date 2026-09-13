@@ -50,6 +50,8 @@ export interface Task {
 	percent_complete?: number;
 	color?: string | null;
 	position?: number;
+	freeform_x?: number | null;
+	freeform_y?: number | null;
 	geo_latitude?: number | null;
 	geo_longitude?: number | null;
 	geo?: GeoLocation | null;
@@ -152,6 +154,8 @@ export interface UpdateTaskInput {
 	percent_complete?: number;
 	color?: string | null;
 	position?: number;
+	freeform_x?: number | null;
+	freeform_y?: number | null;
 	geo_latitude?: number | null;
 	geo_longitude?: number | null;
 	geo?: GeoLocation | null;

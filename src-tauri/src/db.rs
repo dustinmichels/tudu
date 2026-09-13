@@ -1,7 +1,7 @@
+use libsql::{params, Builder, Connection, Database};
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
-use libsql::{params, Builder, Connection, Database};
 
 #[derive(Clone)]
 pub struct DbConnection(pub Connection);
@@ -39,11 +39,21 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0004_list_icon",
         sql: include_str!("../migrations/0004_list_icon.sql"),
     },
+    Migration {
+        version: 5,
+        name: "0005_freeform_coordinates",
+        sql: include_str!("../migrations/0005_freeform_coordinates.sql"),
+    },
 ];
 
-pub async fn ensure_default_inbox(conn: &Connection) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+pub async fn ensure_default_inbox(
+    conn: &Connection,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let mut rows = conn
-        .query("SELECT id FROM lists WHERE lower(name) = 'inbox' AND deleted_at IS NULL LIMIT 1", ())
+        .query(
+            "SELECT id FROM lists WHERE lower(name) = 'inbox' AND deleted_at IS NULL LIMIT 1",
+            (),
+        )
         .await?;
     if let Some(row) = rows.next().await? {
         let id: String = row.get(0)?;
@@ -59,14 +69,17 @@ pub async fn ensure_default_inbox(conn: &Connection) -> Result<String, Box<dyn s
     Ok(id)
 }
 
-pub async fn run_migrations(conn: &Connection) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+pub async fn run_migrations(
+    conn: &Connection,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS _migrations (
             version INTEGER PRIMARY KEY NOT NULL,
             name TEXT NOT NULL,
             applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-        );"
-    ).await?;
+        );",
+    )
+    .await?;
 
     let mut rows = conn
         .query("SELECT version FROM _migrations ORDER BY version ASC", ())
@@ -83,7 +96,8 @@ pub async fn run_migrations(conn: &Connection) -> Result<(), Box<dyn std::error:
             conn.execute(
                 "INSERT INTO _migrations (version, name) VALUES (?1, ?2)",
                 params![migration.version, migration.name],
-            ).await?;
+            )
+            .await?;
         }
     }
 
@@ -98,11 +112,11 @@ pub async fn init_db(db_path: &Path) -> Result<DbState, Box<dyn std::error::Erro
     let db = Builder::new_local(db_path).build().await?;
     let conn = db.connect()?;
 
-    conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;").await?;
+    conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")
+        .await?;
 
     run_migrations(&conn).await?;
     ensure_default_inbox(&conn).await?;
-
 
     Ok(DbState {
         db: Arc::new(db),
@@ -123,10 +137,14 @@ mod tests {
             let state = init_db(&db_path).await.expect("init_db failed");
 
             // Verify tables exist
-            let mut rows = state.conn.query(
-                "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name ASC",
-                (),
-            ).await.expect("query failed");
+            let mut rows = state
+                .conn
+                .query(
+                    "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name ASC",
+                    (),
+                )
+                .await
+                .expect("query failed");
 
             let mut tables = Vec::new();
             while let Some(row) = rows.next().await.unwrap() {
@@ -134,15 +152,23 @@ mod tests {
                 tables.push(name);
             }
 
-            assert!(tables.contains(&"_migrations".to_string()), "_migrations missing");
+            assert!(
+                tables.contains(&"_migrations".to_string()),
+                "_migrations missing"
+            );
             assert!(tables.contains(&"lists".to_string()), "lists missing");
             assert!(tables.contains(&"tasks".to_string()), "tasks missing");
             assert!(tables.contains(&"tags".to_string()), "tags missing");
-            assert!(tables.contains(&"task_tags".to_string()), "task_tags missing");
+            assert!(
+                tables.contains(&"task_tags".to_string()),
+                "task_tags missing"
+            );
             assert!(tables.contains(&"notes".to_string()), "notes missing");
 
             // Verify idempotence: running init_db / migrations a second time succeeds
-            run_migrations(&state.conn).await.expect("idempotent migration run failed");
+            run_migrations(&state.conn)
+                .await
+                .expect("idempotent migration run failed");
 
             // Clean up
             let _ = std::fs::remove_dir_all(temp_dir);

@@ -211,7 +211,7 @@ mock.module("@tauri-apps/api/core", () => ({
 	},
 }));
 
-describe("Phase 7: Right Pane (Task Detail & Subtasks)", () => {
+describe("Task Detail & Subtasks", () => {
 	beforeEach(() => {
 		setActivePinia(createPinia());
 		mockInvokes.length = 0;
