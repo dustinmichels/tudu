@@ -266,8 +266,6 @@ async function handleToggleComplete() {
 
 async function handleDelete() {
 	if (!task.value) return;
-	const confirmDelete = window.confirm("Are you sure you want to delete this task?");
-	if (!confirmDelete) return;
 
 	try {
 		const id = task.value.id;
@@ -715,9 +713,6 @@ function cancelEditNote() {
 }
 
 async function handleDeleteNote(noteId: string) {
-	const confirmDelete = window.confirm("Delete this note?");
-	if (!confirmDelete) return;
-
 	try {
 		await apiDeleteNote(noteId);
 		if (detailData.value) {

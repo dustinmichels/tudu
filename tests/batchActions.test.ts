@@ -289,4 +289,31 @@ describe("Batch Actions & Task Row Item", () => {
 		expect(store.selectedTaskIds.has("t3")).toBe(false);
 		expect(store.selectedTaskIds.size).toBe(0);
 	});
+
+	test("select all visible tasks and batch delete removes all selected tasks", async () => {
+		const store = useTaskStore();
+		store.tasks = [...mockTasks];
+		store.allTasks = [...mockTasks];
+
+		const visibleIds = store.tasks.map((t) => t.id);
+		expect(visibleIds.length).toBeGreaterThan(0);
+
+		// Simulate Select All
+		store.setSelectedTaskIds(visibleIds);
+		expect(store.selectedTaskIds.size).toBe(visibleIds.length);
+		for (const id of visibleIds) {
+			expect(store.selectedTaskIds.has(id)).toBe(true);
+		}
+
+		// Simulate Batch Delete
+		const idsToDelete = Array.from(store.selectedTaskIds);
+		await store.batchDelete(idsToDelete);
+		store.clearSelection();
+
+		expect(store.tasks.length).toBe(0);
+		expect(store.selectedTaskIds.size).toBe(0);
+		for (const id of visibleIds) {
+			expect(store.allTasks.find((t) => t.id === id)?.deleted_at).toBeTruthy();
+		}
+	});
 });

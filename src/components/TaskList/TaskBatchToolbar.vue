@@ -69,6 +69,14 @@ onUnmounted(() => {
 	document.removeEventListener("click", handleDocumentClick);
 });
 
+function toggleSelectAll() {
+	if (allVisibleSelected.value) {
+		selectNone();
+	} else {
+		selectAll();
+	}
+}
+
 function selectAll() {
 	taskStore.setSelectedTaskIds(props.visibleTasks.map((t) => t.id));
 	closeDropdowns();
@@ -218,10 +226,6 @@ async function handleBatchRemoveTag(tagName: string) {
 async function handleBatchDelete() {
 	const ids = Array.from(taskStore.selectedTaskIds);
 	if (!ids.length) return;
-	const confirmDelete = window.confirm(
-		`Delete ${ids.length} selected task${ids.length > 1 ? "s" : ""}?`,
-	);
-	if (!confirmDelete) return;
 
 	isBatchOperating.value = true;
 	try {
@@ -242,16 +246,26 @@ async function handleBatchDelete() {
 	>
 		<div class="flex items-center gap-1.5 flex-wrap">
 			<!-- Multi-select checkbox dropdown (Select All / None / Invert) -->
-			<div class="relative" data-dropdown-container>
+			<div
+				class="relative inline-flex items-stretch rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900"
+				data-dropdown-container
+			>
 				<button
 					type="button"
-					@click="toggleDropdown('select')"
-					class="flex items-center gap-1 px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer"
-					title="Selection menu"
+					@click="toggleSelectAll"
+					class="flex items-center justify-center px-1.5 py-1 rounded-l hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer"
+					:title="allVisibleSelected ? 'Deselect all' : 'Select all'"
 				>
 					<CheckSquare v-if="allVisibleSelected" class="w-3.5 h-3.5 text-emerald-600" />
 					<MinusSquare v-else-if="someVisibleSelected" class="w-3.5 h-3.5 text-emerald-600" />
 					<Square v-else class="w-3.5 h-3.5 text-zinc-400" />
+				</button>
+				<button
+					type="button"
+					@click="toggleDropdown('select')"
+					class="flex items-center justify-center px-1 py-1 border-l border-zinc-200 dark:border-zinc-700 rounded-r hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer"
+					title="Selection menu"
+				>
 					<ChevronDown class="w-3 h-3 opacity-60" />
 				</button>
 

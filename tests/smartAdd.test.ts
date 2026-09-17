@@ -154,18 +154,18 @@ describe("Smart Add Parser and Helpers", () => {
 		it("suggests matching context tags", () => {
 			const suggestions = getContextSuggestions(gtdTags, "calls");
 			expect(suggestions.length).toBe(1);
-			expect(suggestions[0].label).toBe("@calls");
-			expect(suggestions[0].insertValue).toBe("calls");
-			expect(suggestions[0].badge).toBe("@calls");
-			expect(suggestions[0].type).toBe("context");
+			expect(suggestions[0]?.label).toBe("@calls");
+			expect(suggestions[0]?.insertValue).toBe("calls");
+			expect(suggestions[0]?.badge).toBe("@calls");
+			expect(suggestions[0]?.type).toBe("context");
 		});
 
 		it("suggests both partial match and new context option when query is partial", () => {
 			const suggestions = getContextSuggestions(gtdTags, "call");
 			expect(suggestions.length).toBe(2);
-			expect(suggestions[0].label).toBe("@calls");
-			expect(suggestions[1].label).toBe("@call");
-			expect(suggestions[1].description).toBe("New context");
+			expect(suggestions[0]?.label).toBe("@calls");
+			expect(suggestions[1]?.label).toBe("@call");
+			expect(suggestions[1]?.description).toBe("New context");
 		});
 
 		it("suggests all context tags when query is empty", () => {
