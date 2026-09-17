@@ -5,6 +5,7 @@ import { useFilterStore } from "../stores/filters.ts";
 import { type DefaultView, useListStore } from "../stores/lists.ts";
 import { useTaskStore } from "../stores/tasks.ts";
 import { useUIStore } from "../stores/ui.ts";
+import { useUndoStore } from "../stores/undo.ts";
 
 export interface ShortcutOptions {
 	onFocusQuickAdd?: () => void;
@@ -44,6 +45,11 @@ export function handleEscape(
 		uiStore.toggleImport(false);
 		return true;
 	}
+	// Priority 2: Multi-selection
+	if (taskStore.selectedTaskIds.size > 0) {
+		taskStore.clearSelection();
+		return true;
+	}
 
 	// Priority 2: Active task / selection & detail pane
 	if (taskStore.activeTaskId) {
@@ -58,6 +64,9 @@ export function handleEscape(
 const SMART_VIEW_ORDER: DefaultView[] = [
 	"inbox",
 	"all",
+	"next_actions",
+	"waiting_on",
+	"someday_maybe",
 	"today",
 	"tomorrow",
 	"this_week",
@@ -171,6 +180,22 @@ export function handleGlobalShortcut(
 		return false;
 	}
 
+	// Cmd/Ctrl + Z -> Undo recent action
+	if (isMod && !e.shiftKey && !e.altKey && (e.key === "z" || e.key === "Z")) {
+		if (isEditing) {
+			return false; // Retain native browser undo inside text inputs
+		}
+		const undoStore = useUndoStore();
+		if (undoStore.canUndo) {
+			e.preventDefault();
+			void undoStore.undo().catch((err) => {
+				console.error("Failed to undo via shortcut:", err);
+			});
+			return true;
+		}
+		return false;
+	}
+
 	// Cmd/Ctrl + Shift + P -> Open Command Palette (Control Panel)
 	if (isMod && e.shiftKey && (e.key === "P" || e.key === "p")) {
 		e.preventDefault();
@@ -238,6 +263,39 @@ export function handleGlobalShortcut(
 		e.preventDefault();
 		uiStore.toggleCapture(true);
 		return true;
+	}
+	// Cmd/Ctrl + A -> Select all visible tasks (when not editing text)
+	if (isMod && !e.shiftKey && !e.altKey && (e.key === "a" || e.key === "A") && !isEditing) {
+		let visibleIds: string[] = [];
+		if (options?.getVisibleTasks) {
+			visibleIds = options
+				.getVisibleTasks()
+				.map((t) => (typeof t === "string" ? t : t.id))
+				.filter(Boolean);
+		} else if (typeof document !== "undefined") {
+			const elements = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]"));
+			const domIds: string[] = [];
+			for (const el of elements) {
+				const id = el.getAttribute("data-task-id");
+				if (id && !domIds.includes(id)) {
+					domIds.push(id);
+				}
+			}
+			if (domIds.length > 0) {
+				visibleIds = domIds;
+			}
+		}
+
+		if (!visibleIds.length) {
+			const fallbackTasks = taskStore.tasks.filter((t) => !t.parent_id);
+			visibleIds = (fallbackTasks.length ? fallbackTasks : taskStore.tasks).map((t) => t.id);
+		}
+
+		if (visibleIds.length > 0) {
+			e.preventDefault();
+			taskStore.setSelectedTaskIds(visibleIds);
+			return true;
+		}
 	}
 
 	// '/' -> Focus search input
@@ -341,6 +399,22 @@ export function handleGlobalShortcut(
 
 	// 'c' -> complete selected task
 	if (e.key === "c" && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
+		if (taskStore.selectedTaskIds.size > 0) {
+			e.preventDefault();
+			const ids = Array.from(taskStore.selectedTaskIds);
+			void taskStore
+				.batchUpdate({
+					task_ids: ids,
+					completed: true,
+				})
+				.then(() => {
+					taskStore.clearSelection();
+				})
+				.catch((err) => {
+					console.error("Failed to batch complete tasks via shortcut:", err);
+				});
+			return true;
+		}
 		const currentId = taskStore.activeTaskId;
 		if (!currentId) return false;
 		e.preventDefault();
@@ -352,6 +426,19 @@ export function handleGlobalShortcut(
 
 	// 'p' -> postpone selected task by 1 day
 	if (e.key === "p" && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
+		if (taskStore.selectedTaskIds.size > 0) {
+			e.preventDefault();
+			const ids = Array.from(taskStore.selectedTaskIds);
+			void taskStore
+				.batchUpdate({
+					task_ids: ids,
+					postpone_days: 1,
+				})
+				.catch((err) => {
+					console.error("Failed to batch postpone tasks via shortcut:", err);
+				});
+			return true;
+		}
 		const currentId = taskStore.activeTaskId;
 		if (!currentId) return false;
 		e.preventDefault();
@@ -369,32 +456,62 @@ export function handleGlobalShortcut(
 		!e.metaKey &&
 		!e.altKey
 	) {
-		const currentId = taskStore.activeTaskId;
-		if (!currentId) return false;
-		e.preventDefault();
 		const priorityMap: Record<string, Priority | null> = {
 			"1": PRIORITY.HIGH as Priority,
 			"2": PRIORITY.MEDIUM as Priority,
 			"3": PRIORITY.LOW as Priority,
 			"4": null,
 		};
+		const newPriority = priorityMap[e.key] ?? null;
+
+		if (taskStore.selectedTaskIds.size > 0) {
+			e.preventDefault();
+			const ids = Array.from(taskStore.selectedTaskIds);
+			void taskStore
+				.batchUpdate({
+					task_ids: ids,
+					priority: newPriority,
+				})
+				.catch((err) => {
+					console.error("Failed to batch update priority via shortcut:", err);
+				});
+			return true;
+		}
+
+		const currentId = taskStore.activeTaskId;
+		if (!currentId) return false;
+		e.preventDefault();
+		// Undo capture lives in taskStore.updateTask.
 		void taskStore
 			.updateTask({
 				id: currentId,
-				priority: priorityMap[e.key] ?? null,
+				priority: newPriority,
 			})
 			.catch((err) => {
 				console.error("Failed to update priority via shortcut:", err);
 			});
 		return true;
 	}
-
 	// Delete / Backspace or '#' / 'd' -> delete selected task
 	if (
 		((e.key === "Backspace" || e.key === "Delete") && !e.altKey) ||
 		(e.key === "#" && !e.ctrlKey && !e.metaKey && !e.altKey) ||
 		(e.key === "d" && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey)
 	) {
+		if (taskStore.selectedTaskIds.size > 0) {
+			e.preventDefault();
+			const ids = Array.from(taskStore.selectedTaskIds);
+			void taskStore
+				.batchDelete(ids)
+				.then(() => {
+					taskStore.clearSelection();
+				})
+				.catch((err) => {
+					console.error("Failed to batch delete tasks via shortcut:", err);
+				});
+			return true;
+		}
+
 		const currentId = taskStore.activeTaskId;
 		if (!currentId) return false;
 		e.preventDefault();

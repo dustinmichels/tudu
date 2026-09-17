@@ -27,6 +27,8 @@ pub fn run() {
             commands::update_task,
             commands::delete_task,
             commands::batch_delete_tasks,
+            commands::restore_task,
+            commands::batch_restore_tasks,
             commands::toggle_task_complete,
             commands::batch_update_tasks,
             commands::get_tags,

@@ -8,10 +8,10 @@ export interface ParsedSmartAdd {
 	priority?: Priority;
 }
 
-export type SmartShortcutPrefix = "#" | "^" | "!";
+export type SmartShortcutPrefix = "#" | "^" | "!" | "@";
 
 export interface SmartSuggestion {
-	type: "tag" | "list" | "due" | "priority";
+	type: "tag" | "list" | "due" | "priority" | "context";
 	label: string;
 	description?: string;
 	insertValue: string; // The token to insert, e.g. "Work", "today", "1"
@@ -140,9 +140,9 @@ export function detectSmartToken(text: string, cursorPos: number): ActiveSmartTo
 	if (cursorPos < 0 || cursorPos > text.length) return null;
 
 	const textBeforeCursor = text.slice(0, cursorPos);
-	// Search backwards from cursor position to find the nearest prefix #, ^, or !
+	// Search backwards from cursor position to find the nearest prefix #, ^, !, or @
 	// A token must start at start of line or immediately after whitespace.
-	const tokenMatch = /(?:^|\s)([#^!])([^\s]*)$/.exec(textBeforeCursor);
+	const tokenMatch = /(?:^|\s)([#^!@])([^\s]*)$/.exec(textBeforeCursor);
 	if (!tokenMatch?.[1]) return null;
 
 	const prefix = tokenMatch[1] as SmartShortcutPrefix;
@@ -310,7 +310,7 @@ export function getTagAndListSuggestions(
 				label: tag,
 				description: isAlsoList ? "Tag" : undefined,
 				insertValue: tag.includes(" ") ? `"${tag}"` : tag,
-				badge: `#${tag}`,
+				badge: formatTagLabel(tag),
 			});
 		}
 	}
@@ -323,7 +323,52 @@ export function getTagAndListSuggestions(
 			label: cleanQuery,
 			description: "New tag",
 			insertValue: cleanQuery.includes(" ") ? `"${cleanQuery}"` : cleanQuery,
-			badge: `#${cleanQuery}`,
+			badge: formatTagLabel(cleanQuery),
+		});
+	}
+
+	return suggestions;
+}
+
+/**
+ * Format a tag name for display as a pill, label, or header.
+ * Context tags (starting with '@') display as '@context'.
+ * Standard tags display as '#tag'.
+ */
+export function formatTagLabel(name: string): string {
+	if (!name) return "";
+	return name.startsWith("@") ? name : `#${name}`;
+}
+
+/**
+ * Context suggestions for (@)
+ */
+export function getContextSuggestions(tags: string[], query = ""): SmartSuggestion[] {
+	const q = query.trim().toLowerCase().replace(/^@/, "");
+	const suggestions: SmartSuggestion[] = [];
+
+	for (const tag of tags) {
+		const rawName = tag.startsWith("@") ? tag.slice(1) : tag;
+		const displayName = `@${rawName}`;
+		if (!q || rawName.toLowerCase().includes(q) || displayName.toLowerCase().includes(q)) {
+			suggestions.push({
+				type: "context",
+				label: displayName,
+				description: "Context",
+				insertValue: rawName.includes(" ") ? `"${rawName}"` : rawName,
+				badge: displayName,
+			});
+		}
+	}
+
+	if (q && !tags.some((t) => (t.startsWith("@") ? t.slice(1) : t).toLowerCase() === q)) {
+		const cleanQuery = query.trim().replace(/^@/, "");
+		suggestions.push({
+			type: "context",
+			label: `@${cleanQuery}`,
+			description: "New context",
+			insertValue: cleanQuery.includes(" ") ? `"${cleanQuery}"` : cleanQuery,
+			badge: `@${cleanQuery}`,
 		});
 	}
 
@@ -354,7 +399,7 @@ export function parseSmartAdd(
 	// Group 2: double-quoted value
 	// Group 3: single-quoted value
 	// Group 4: unquoted value
-	const regex = /(?:^|\s)([#!^])(?:"([^"]+)"|'([^']+)'|([^\s]+))/g;
+	const regex = /(?:^|\s)([#!^@])(?:"([^"]+)"|'([^']+)'|([^\s]+))/g;
 
 	let cleanedTitle = rawInput;
 
@@ -392,6 +437,12 @@ export function parseSmartAdd(
 				if (!tags.includes(value)) {
 					tags.push(value);
 				}
+			}
+			match.resolved = true;
+		} else if (prefix === "@") {
+			const rawContext = value.startsWith("@") ? value : `@${value}`;
+			if (!tags.includes(rawContext)) {
+				tags.push(rawContext);
 			}
 			match.resolved = true;
 		} else if (prefix === "^") {

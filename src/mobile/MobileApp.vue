@@ -18,6 +18,7 @@ import {
 } from "lucide-vue-next";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import BunnyCelebration from "../components/BunnyCelebration.vue";
+import FloatingUndoButton from "../components/FloatingUndoButton.vue";
 import CaptureModal from "../components/CaptureModal.vue";
 import ImportModal from "../components/ImportModal.vue";
 import Sidebar from "../components/Sidebar.vue";
@@ -29,6 +30,7 @@ import { useListStore } from "../stores/lists.ts";
 import { useTagStore } from "../stores/tags.ts";
 import { useTaskStore } from "../stores/tasks.ts";
 import { useUIStore } from "../stores/ui.ts";
+import { formatTagLabel } from "../utils/smartAdd.ts";
 
 const filterStore = useFilterStore();
 const listStore = useListStore();
@@ -163,7 +165,7 @@ const headerTitle = computed(() => {
 	if (activeTab.value === "settings") return "Settings";
 	if (activeTab.value === "lists") {
 		if (inListDetail.value) {
-			if (filterStore.selectedTag) return `#${filterStore.selectedTag}`;
+			if (filterStore.selectedTag) return formatTagLabel(filterStore.selectedTag);
 			if (listStore.activeList) return listStore.activeList.name;
 			if (listStore.activeView) {
 				const v = listStore.activeView;
@@ -571,5 +573,6 @@ onUnmounted(() => {
 		<CaptureModal />
 		<ImportModal />
 		<BunnyCelebration />
+		<FloatingUndoButton />
 	</div>
 </template>

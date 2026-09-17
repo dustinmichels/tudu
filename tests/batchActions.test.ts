@@ -247,4 +247,46 @@ describe("Batch Actions & Task Row Item", () => {
 		expect(removeCall).toBeDefined();
 		expect(removeCall?.args).toEqual({ taskIds: ["t1", "t2"], tagId: "tag-1" });
 	});
+
+	test("taskStore selection state: toggle, range, clear, and deletion pruning", async () => {
+		const store = useTaskStore();
+		store.tasks = [...mockTasks];
+		store.allTasks = [...mockTasks];
+
+		expect(store.selectedTaskIds.size).toBe(0);
+
+		// Toggle select
+		store.toggleSelectTask("t1");
+		expect(store.selectedTaskIds.has("t1")).toBe(true);
+		expect(store.selectedTaskIds.size).toBe(1);
+
+		store.toggleSelectTask("t1");
+		expect(store.selectedTaskIds.has("t1")).toBe(false);
+		expect(store.selectedTaskIds.size).toBe(0);
+
+		// Range select
+		store.selectRange("t1", "t3", ["t1", "t2", "t3", "t4"]);
+		expect(store.selectedTaskIds.has("t1")).toBe(true);
+		expect(store.selectedTaskIds.has("t2")).toBe(true);
+		expect(store.selectedTaskIds.has("t3")).toBe(true);
+		expect(store.selectedTaskIds.has("t4")).toBe(false);
+		expect(store.selectedTaskIds.size).toBe(3);
+
+		// Clear selection
+		store.clearSelection();
+		expect(store.selectedTaskIds.size).toBe(0);
+
+		// Prune on batchDelete
+		store.setSelectedTaskIds(["t1", "t2", "t3"]);
+		await store.batchDelete(["t1", "t2"]);
+		expect(store.selectedTaskIds.has("t1")).toBe(false);
+		expect(store.selectedTaskIds.has("t2")).toBe(false);
+		expect(store.selectedTaskIds.has("t3")).toBe(true);
+		expect(store.selectedTaskIds.size).toBe(1);
+
+		// Prune on deleteTask
+		await store.deleteTask("t3");
+		expect(store.selectedTaskIds.has("t3")).toBe(false);
+		expect(store.selectedTaskIds.size).toBe(0);
+	});
 });

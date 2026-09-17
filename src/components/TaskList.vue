@@ -16,30 +16,15 @@ const listStore = useListStore();
 const taskStore = useTaskStore();
 const filterStore = useFilterStore();
 
-const hasActiveSelection = computed(
+const hasActiveContext = computed(
 	() => !!listStore.activeList || !!listStore.activeView || !!filterStore.selectedTag,
 );
 
-// ---------------------------------------------------------------------------
-// Sort State
 // ---------------------------------------------------------------------------
 // Sort State (driven by filterStore as single source of truth)
 // ---------------------------------------------------------------------------
 const activeSortField = computed(() => filterStore.sortBy as SortFieldOption);
 const activeSortOrder = computed(() => filterStore.sortOrder);
-
-function handleSortClick(field: SortFieldOption) {
-	if (filterStore.sortBy === field) {
-		if (filterStore.sortOrder === "asc") {
-			filterStore.setSorting(field, "desc");
-		} else {
-			// third click clears back to default order
-			filterStore.setSorting("priority", "asc");
-		}
-	} else {
-		filterStore.setSorting(field, "asc");
-	}
-}
 
 const visibleTasks = computed(() => {
 	// If user is searching, use filteredTasks which handles search across title, description, location, url
@@ -69,21 +54,25 @@ const visibleTasks = computed(() => {
 // ---------------------------------------------------------------------------
 // Selection State
 // ---------------------------------------------------------------------------
-const selectedTaskIds = ref<Set<string>>(new Set());
+const lastSelectedTaskId = ref<string | null>(null);
 
 function handleToggleSelectTask(event: MouseEvent, taskId: string) {
 	event.stopPropagation();
-	const next = new Set(selectedTaskIds.value);
-	if (next.has(taskId)) {
-		next.delete(taskId);
+	if (event.shiftKey && lastSelectedTaskId.value) {
+		const visibleIds = visibleTasks.value.map((t) => t.id);
+		taskStore.selectRange(lastSelectedTaskId.value, taskId, visibleIds);
 	} else {
-		next.add(taskId);
+		taskStore.toggleSelectTask(taskId);
+		lastSelectedTaskId.value = taskId;
 	}
-	selectedTaskIds.value = next;
 }
 
 function handleDeleteTask(taskId: string) {
-	selectedTaskIds.value.delete(taskId);
+	if (taskStore.selectedTaskIds.has(taskId)) {
+		const next = new Set(taskStore.selectedTaskIds);
+		next.delete(taskId);
+		taskStore.setSelectedTaskIds(next);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -136,7 +125,8 @@ onUnmounted(() => {
 watch(
 	() => [listStore.activeListId, listStore.activeView, filterStore.selectedTag],
 	() => {
-		selectedTaskIds.value.clear();
+		taskStore.clearSelection();
+		lastSelectedTaskId.value = null;
 		closeContextMenu();
 	},
 );
@@ -151,24 +141,21 @@ watch(
 			:active-sort-field="activeSortField"
 			:active-sort-order="activeSortOrder"
 			:visible-tasks="visibleTasks"
-			@change-sort="handleSortClick"
 		/>
 
 		<!-- Batch Action Toolbar (When tasks are available or selected) -->
 		<TaskBatchToolbar
-			v-if="hasActiveSelection && visibleTasks.length > 0"
-			:selected-task-ids="selectedTaskIds"
+			v-if="(hasActiveContext || taskStore.selectedTaskIds.size > 0) && visibleTasks.length > 0"
 			:visible-tasks="visibleTasks"
-			@update:selected-task-ids="selectedTaskIds = $event"
 		/>
 
 		<!-- Quick Add Input & Smart Add Dropdown -->
-		<TaskSmartAddInput v-if="hasActiveSelection" />
+		<TaskSmartAddInput v-if="hasActiveContext" />
 
 		<!-- Tasks List Container -->
 		<div class="flex-1 overflow-y-auto p-3 space-y-1">
 			<!-- Empty state (no list/view selected) -->
-			<HomeCaptureView v-if="!hasActiveSelection" />
+			<HomeCaptureView v-if="!hasActiveContext" />
 
 			<!-- Loading state -->
 			<div
@@ -199,7 +186,6 @@ watch(
 				v-for="task in visibleTasks"
 				:key="task.id"
 				:task="task"
-				:selected-task-ids="selectedTaskIds"
 				@toggle-select="handleToggleSelectTask"
 				@context-menu="handleTaskContextMenu"
 				@delete-task="handleDeleteTask"

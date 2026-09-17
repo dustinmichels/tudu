@@ -17,10 +17,10 @@ import { useFilterStore } from "../../stores/filters.ts";
 import { useListStore } from "../../stores/lists.ts";
 import { isOverdue, useTaskStore } from "../../stores/tasks.ts";
 import { useUIStore } from "../../stores/ui.ts";
+import { formatTagLabel } from "../../utils/smartAdd.ts";
 
 const props = defineProps<{
 	task: Task;
-	selectedTaskIds: Set<string>;
 }>();
 
 const emit = defineEmits<{
@@ -33,6 +33,7 @@ const listStore = useListStore();
 const taskStore = useTaskStore();
 const filterStore = useFilterStore();
 const uiStore = useUIStore();
+const selectedTaskIds = computed(() => taskStore.selectedTaskIds);
 
 const isView = computed(() => listStore.activeView !== null);
 
@@ -104,7 +105,7 @@ function handleToggleSelectTask(event: MouseEvent, taskId: string) {
 }
 
 function handleSelectTask(event: MouseEvent, taskId: string) {
-	if (event.metaKey || event.ctrlKey) {
+	if (event.shiftKey || event.metaKey || event.ctrlKey) {
 		handleToggleSelectTask(event, taskId);
 		return;
 	}
@@ -125,7 +126,7 @@ function handleKeydownTask(event: KeyboardEvent, taskId: string) {
 			}
 		}
 		event.preventDefault();
-		if (event.metaKey || event.ctrlKey) {
+		if (event.shiftKey || event.metaKey || event.ctrlKey) {
 			emit("toggle-select", event as unknown as MouseEvent, taskId);
 			return;
 		}
@@ -276,8 +277,7 @@ function getTaskTags(taskId: string): Tag[] {
 							@click="handleTagPillClick($event, tag.name)"
 							class="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/80 hover:bg-emerald-100 transition-colors cursor-pointer"
 						>
-							<span class="opacity-60">#</span>
-							<span>{{ tag.name }}</span>
+							<span>{{ formatTagLabel(tag.name) }}</span>
 						</button>
 					</div>
 				</div>
@@ -461,8 +461,7 @@ function getTaskTags(taskId: string): Tag[] {
 								@click="handleTagPillClick($event, tag.name)"
 								class="inline-flex items-center gap-0.5 text-[9px] font-medium px-1.5 py-0.2 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/80 hover:bg-emerald-100 transition-colors cursor-pointer"
 							>
-								<span class="opacity-60">#</span>
-								<span>{{ tag.name }}</span>
+								<span>{{ formatTagLabel(tag.name) }}</span>
 							</button>
 						</div>
 					</div>

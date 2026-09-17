@@ -271,8 +271,8 @@ mod tests {
 
             // Verify default Inbox list exists
             let initial_lists = get_lists_impl(&conn).await.expect("get initial lists");
-            assert_eq!(initial_lists.len(), 1);
-            assert_eq!(initial_lists[0].name, "Inbox");
+            assert_eq!(initial_lists.len(), 4);
+            assert!(initial_lists.iter().any(|l| l.name == "Inbox"));
             let inbox_id = initial_lists[0].id.clone();
 
             // Attempting to delete the default Inbox list must fail
@@ -285,32 +285,31 @@ mod tests {
                 .expect("create list 1");
             assert_eq!(list1.name, "Work");
             assert_eq!(list1.color, Some("#ff0000".to_string()));
-            assert_eq!(list1.position, 1);
+            assert_eq!(list1.position, 4);
             assert!(!list1.is_archived);
 
             let list2 = create_list_impl(&conn, "Personal".to_string(), None, None)
                 .await
                 .expect("create list 2");
             assert_eq!(list2.name, "Personal");
-            assert_eq!(list2.position, 2);
+            assert_eq!(list2.position, 5);
             assert!(!list2.is_archived);
 
-            // Get lists -> should be 3 (Inbox + Work + Personal)
+            // Get lists -> should be 6 (4 default + Work + Personal)
             let lists = get_lists_impl(&conn).await.expect("get lists");
-            assert_eq!(lists.len(), 3);
+            assert_eq!(lists.len(), 6);
             assert_eq!(lists[0].id, inbox_id);
-            assert_eq!(lists[1].id, list1.id);
-            assert_eq!(lists[2].id, list2.id);
-
+            assert_eq!(lists[4].id, list1.id);
+            assert_eq!(lists[5].id, list2.id);
             // Delete custom list (soft delete)
             delete_list_impl(&conn, list1.id.clone())
                 .await
                 .expect("delete list");
 
             let remaining = get_lists_impl(&conn).await.expect("get lists after delete");
-            assert_eq!(remaining.len(), 2);
+            assert_eq!(remaining.len(), 5);
             assert_eq!(remaining[0].id, inbox_id);
-            assert_eq!(remaining[1].id, list2.id);
+            assert_eq!(remaining[4].id, list2.id);
             // Direct check in DB that list1 has deleted_at set
             let mut rows = conn
                 .query(

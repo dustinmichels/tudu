@@ -41,6 +41,7 @@ import { useTagStore } from "../stores/tags.ts";
 import { isOverdue, useTaskStore } from "../stores/tasks.ts";
 import { useUIStore } from "../stores/ui.ts";
 import { renderMarkdown } from "../utils/markdown.ts";
+import { formatTagLabel } from "../utils/smartAdd.ts";
 
 const listStore = useListStore();
 const taskStore = useTaskStore();
@@ -1090,7 +1091,7 @@ function formatDate(dateStr: string | null | undefined): string {
 								:key="t.id"
 								class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-zinc-200 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-300/50 dark:border-zinc-700/50"
 							>
-								#{{ t.name }}
+								{{ formatTagLabel(t.name) }}
 								<button
 									type="button"
 									@click="handleRemoveTag(t.id)"

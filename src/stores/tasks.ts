@@ -3,10 +3,12 @@ import { computed, ref } from "vue";
 import type { CreateTaskInput, Priority, Task, UpdateTaskInput } from "../models/index.ts";
 import {
 	batchDeleteTasks as apiBatchDeleteTasks,
+	batchRestoreTasks as apiBatchRestoreTasks,
 	batchUpdateTasks as apiBatchUpdateTasks,
 	createTask as apiCreateTask,
 	deleteTask as apiDeleteTask,
 	getTasks as apiGetTasks,
+	restoreTask as apiRestoreTask,
 	toggleTaskComplete as apiToggleTaskComplete,
 	updateTask as apiUpdateTask,
 } from "../services/api.ts";
@@ -28,6 +30,7 @@ import { useFilterStore } from "./filters.ts";
 import { useListStore } from "./lists.ts";
 import { useTagStore } from "./tags.ts";
 import { useUIStore } from "./ui.ts";
+import { useUndoStore } from "./undo.ts";
 
 export {
 	isOverdue,
@@ -49,6 +52,81 @@ export interface AddTaskOptions {
 	parent_id?: string | null;
 }
 
+export interface BatchUpdateOptions {
+	task_ids: string[];
+	completed?: boolean;
+	postpone_days?: number;
+	due?: string | null;
+	list_id?: string;
+	priority?: Priority | null;
+}
+
+function describeBatch(options: BatchUpdateOptions, count: number, title: string): string {
+	const subject = count === 1 ? `"${title}"` : `${count} tasks`;
+	if (options.completed !== undefined) {
+		return `${options.completed ? "Completed" : "Reopened"} ${subject}`;
+	}
+	if (options.postpone_days !== undefined) return `Postponed ${subject}`;
+	if (options.due !== undefined) return `Changed due date of ${subject}`;
+	if (options.list_id !== undefined) return `Moved ${subject}`;
+	if (options.priority !== undefined) return `Changed priority of ${subject}`;
+	return `Updated ${subject}`;
+}
+
+/**
+ * Capture an inverse operation for the global undo stack.
+ *
+ * Recording is best-effort: store actions are exercised in unit tests without an
+ * active Pinia instance, where `useUndoStore()` throws. Undo history is UI
+ * affordance, never a correctness dependency of the mutation itself.
+ */
+function recordUndo(description: string, undo: () => Promise<void>): void {
+	try {
+		useUndoStore().pushAction({ description, undo });
+	} catch {
+		// No active Pinia: skip capture.
+	}
+}
+
+const UPDATE_VERBS: Record<string, string> = {
+	priority: "Changed priority of",
+	due: "Changed due date of",
+	list_id: "Moved",
+	title: "Renamed",
+	parent_id: "Reparented",
+};
+
+function describeUpdate(input: UpdateTaskInput, title: string): string {
+	const fields = Object.entries(input)
+		.filter(([key, value]) => key !== "id" && value !== undefined)
+		.map(([key]) => key);
+	const verb = (fields.length === 1 ? UPDATE_VERBS[fields[0] as string] : undefined) ?? "Edited";
+	return `${verb} "${title}"`;
+}
+
+/**
+ * Derive the update that reverts `input`, reading prior values from the
+ * pre-mutation snapshot. Returns null when nothing actually changed, so no-op
+ * writes never land in undo history.
+ */
+function buildInverseInput(snapshot: Task | null, input: UpdateTaskInput): UpdateTaskInput | null {
+	if (!snapshot) return null;
+	const prior = snapshot as unknown as Record<string, unknown>;
+	const inverse: UpdateTaskInput = { id: input.id };
+	const sink = inverse as unknown as Record<string, unknown>;
+	let changed = false;
+	for (const [key, value] of Object.entries(input)) {
+		if (key === "id" || value === undefined) continue;
+		// `repeats` is an alias the store folds into `rrule`.
+		const field = key === "repeats" && input.rrule === undefined ? "rrule" : key;
+		const previous = prior[field];
+		if (previous === value) continue;
+		sink[field] = previous ?? null;
+		changed = true;
+	}
+	return changed ? inverse : null;
+}
+
 export const useTaskStore = defineStore("tasks", () => {
 	const tasks = ref<Task[]>([]);
 	const allTasks = ref<Task[]>([]);
@@ -56,6 +134,41 @@ export const useTaskStore = defineStore("tasks", () => {
 	const loading = ref(false);
 	const error = ref<string | null>(null);
 	const includeCompleted = ref(true);
+	const selectedTaskIds = ref<Set<string>>(new Set());
+
+	function toggleSelectTask(id: string) {
+		const next = new Set(selectedTaskIds.value);
+		if (next.has(id)) {
+			next.delete(id);
+		} else {
+			next.add(id);
+		}
+		selectedTaskIds.value = next;
+	}
+
+	function setSelectedTaskIds(ids: Iterable<string>) {
+		selectedTaskIds.value = new Set(ids);
+	}
+
+	function clearSelection() {
+		if (selectedTaskIds.value.size > 0) {
+			selectedTaskIds.value = new Set();
+		}
+	}
+
+	function selectRange(fromId: string, toId: string, visibleIds: string[]) {
+		const fromIdx = visibleIds.indexOf(fromId);
+		const toIdx = visibleIds.indexOf(toId);
+		if (fromIdx === -1 || toIdx === -1) return;
+		const start = Math.min(fromIdx, toIdx);
+		const end = Math.max(fromIdx, toIdx);
+		const next = new Set(selectedTaskIds.value);
+		for (let i = start; i <= end; i++) {
+			const id = visibleIds[i];
+			if (id) next.add(id);
+		}
+		selectedTaskIds.value = next;
+	}
 
 	interface DebounceState {
 		timer: number | null;
@@ -87,8 +200,13 @@ export const useTaskStore = defineStore("tasks", () => {
 		const listStore = useListStore();
 		return getSmartListCounts(allTasks.value, {
 			inboxListId: listStore.inboxList?.id,
+			lists: listStore.lists,
 		});
 	});
+
+	const countNextActions = computed(() => smartCounts.value.next_actions?.incomplete ?? 0);
+	const countWaitingOn = computed(() => smartCounts.value.waiting_on?.incomplete ?? 0);
+	const countSomedayMaybe = computed(() => smartCounts.value.someday_maybe?.incomplete ?? 0);
 
 	const countInbox = computed(() => smartCounts.value.inbox.incomplete);
 	const countToday = computed(() => smartCounts.value.today.incomplete);
@@ -120,6 +238,7 @@ export const useTaskStore = defineStore("tasks", () => {
 			smartView: listStore.activeView,
 			listId: listStore.activeListId,
 			inboxListId: listStore.inboxList?.id,
+			lists: listStore.lists,
 			tag: filterStore.selectedTag,
 			completion: includeCompleted.value ? "all" : "incomplete",
 			searchQuery: filterStore.searchQuery,
@@ -234,6 +353,9 @@ export const useTaskStore = defineStore("tasks", () => {
 			if (!allTasks.value.some((t) => t.id === created.id)) {
 				allTasks.value.push(created);
 			}
+			recordUndo(`Added "${created.title}"`, async () => {
+				await deleteTask(created.id);
+			});
 			return created;
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
@@ -289,6 +411,12 @@ export const useTaskStore = defineStore("tasks", () => {
 				const allIdx = allTasks.value.findIndex((t) => t.id === id);
 				if (allIdx !== -1) allTasks.value[allIdx] = updated;
 			}
+			recordUndo(
+				nextCompleted ? `Completed "${updated.title}"` : `Marked "${updated.title}" incomplete`,
+				async () => {
+					await toggleTask(id, prevCompleted);
+				},
+			);
 			void useTagStore().fetchTags();
 			return updated;
 		} catch (err) {
@@ -337,6 +465,19 @@ export const useTaskStore = defineStore("tasks", () => {
 		if (currentInTasks) applyFields(currentInTasks, input);
 		if (currentInAll) applyFields(currentInAll, input);
 
+		// Discrete mutations (menus, pickers, shortcuts) arrive without an explicit
+		// debounce; per-keystroke editors always pass one and keep native text undo.
+		const undoInput = options?.debounceMs === undefined ? buildInverseInput(snapshot, input) : null;
+		const withUndoCapture = (result: Promise<Task>): Promise<Task> => {
+			if (!undoInput) return result;
+			return result.then((task) => {
+				recordUndo(describeUpdate(input, task.title), async () => {
+					await updateTask(undoInput, { debounceMs: 0 });
+				});
+				return task;
+			});
+		};
+
 		const debounceDelay = options?.debounceMs ?? 300;
 		let state = taskDebounceStateMap.get(id);
 		if (!state) {
@@ -355,22 +496,24 @@ export const useTaskStore = defineStore("tasks", () => {
 		state.pendingInput = state.pendingInput ? { ...state.pendingInput, ...input } : { ...input };
 
 		if (debounceDelay > 0) {
-			return new Promise<Task>((resolve, reject) => {
-				state.pendingResolves.push(resolve);
-				state.pendingRejects.push(reject);
+			return withUndoCapture(
+				new Promise<Task>((resolve, reject) => {
+					state.pendingResolves.push(resolve);
+					state.pendingRejects.push(reject);
 
-				if (state.timer !== null) {
-					globalThis.clearTimeout(state.timer);
-				}
-				// Tauri webview scheduler: browser contract returns a numeric handle.
-				// `globalThis` (not `window`) keeps this runnable under the Bun test runtime.
-				state.timer = (globalThis.setTimeout as Window["setTimeout"])(() => {
-					state.timer = null;
-					processDebounceQueue(id).catch((err) => {
-						error.value = err instanceof Error ? err.message : String(err);
-					});
-				}, debounceDelay);
-			});
+					if (state.timer !== null) {
+						globalThis.clearTimeout(state.timer);
+					}
+					// Tauri webview scheduler: browser contract returns a numeric handle.
+					// `globalThis` (not `window`) keeps this runnable under the Bun test runtime.
+					state.timer = (globalThis.setTimeout as Window["setTimeout"])(() => {
+						state.timer = null;
+						processDebounceQueue(id).catch((err) => {
+							error.value = err instanceof Error ? err.message : String(err);
+						});
+					}, debounceDelay);
+				}),
+			);
 		}
 
 		// Immediate (debounceDelay === 0)
@@ -379,13 +522,15 @@ export const useTaskStore = defineStore("tasks", () => {
 			state.timer = null;
 		}
 
-		return new Promise<Task>((resolve, reject) => {
-			state.pendingResolves.push(resolve);
-			state.pendingRejects.push(reject);
-			processDebounceQueue(id).catch((err) => {
-				error.value = err instanceof Error ? err.message : String(err);
-			});
-		});
+		return withUndoCapture(
+			new Promise<Task>((resolve, reject) => {
+				state.pendingResolves.push(resolve);
+				state.pendingRejects.push(reject);
+				processDebounceQueue(id).catch((err) => {
+					error.value = err instanceof Error ? err.message : String(err);
+				});
+			}),
+		);
 	}
 
 	async function processDebounceQueue(id: string): Promise<Task> {
@@ -483,6 +628,8 @@ export const useTaskStore = defineStore("tasks", () => {
 	}
 
 	async function deleteTask(id: string): Promise<void> {
+		const doomed =
+			tasks.value.find((t) => t.id === id) ?? allTasks.value.find((t) => t.id === id) ?? null;
 		loading.value = true;
 		error.value = null;
 		try {
@@ -507,11 +654,17 @@ export const useTaskStore = defineStore("tasks", () => {
 					t.deleted_at = now;
 				}
 			}
-
 			if (activeTaskId.value && idsToRemove.has(activeTaskId.value)) {
 				activeTaskId.value = null;
 			}
+			if (selectedTaskIds.value.size > 0) {
+				const next = new Set([...selectedTaskIds.value].filter((tid) => !idsToRemove.has(tid)));
+				selectedTaskIds.value = next;
+			}
 			void useTagStore().fetchTags();
+			recordUndo(`Deleted "${doomed?.title ?? "task"}"`, async () => {
+				await restoreTask(id);
+			});
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			error.value = msg;
@@ -550,7 +703,14 @@ export const useTaskStore = defineStore("tasks", () => {
 			if (activeTaskId.value && idsToRemove.has(activeTaskId.value)) {
 				activeTaskId.value = null;
 			}
+			if (selectedTaskIds.value.size > 0) {
+				const next = new Set([...selectedTaskIds.value].filter((tid) => !idsToRemove.has(tid)));
+				selectedTaskIds.value = next;
+			}
 			void useTagStore().fetchTags();
+			recordUndo(`Deleted ${ids.length === 1 ? "1 task" : `${ids.length} tasks`}`, async () => {
+				await batchRestore(ids);
+			});
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			error.value = msg;
@@ -559,15 +719,75 @@ export const useTaskStore = defineStore("tasks", () => {
 			loading.value = false;
 		}
 	}
-	async function batchUpdate(options: {
-		task_ids: string[];
-		completed?: boolean;
-		postpone_days?: number;
-		due?: string | null;
-		list_id?: string;
-		priority?: Priority | null;
-	}): Promise<Task[]> {
+
+	/**
+	 * Revive a soft-deleted task (and the descendants deleted alongside it).
+	 * Backend restore is timestamp-scoped, so the affected set is unknown here;
+	 * refetch instead of patching `deleted_at` locally.
+	 */
+	async function restoreTask(id: string): Promise<Task | null> {
+		loading.value = true;
+		error.value = null;
+		try {
+			const restored = await apiRestoreTask(id);
+			await refreshAfterRestore();
+			return restored;
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			error.value = msg;
+			throw err;
+		} finally {
+			loading.value = false;
+		}
+	}
+
+	async function batchRestore(ids: string[]): Promise<Task[]> {
+		if (ids.length === 0) return [];
+		loading.value = true;
+		error.value = null;
+		try {
+			const restored = await apiBatchRestoreTasks(ids);
+			await refreshAfterRestore();
+			return restored;
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			error.value = msg;
+			throw err;
+		} finally {
+			loading.value = false;
+		}
+	}
+
+	async function refreshAfterRestore(): Promise<void> {
+		const listStore = useListStore();
+		const filterStore = useFilterStore();
+		await fetchAllTasks();
+		if (listStore.activeListId || listStore.activeView || filterStore.selectedTag) {
+			await fetchTasks(
+				listStore.activeListId,
+				includeCompleted.value,
+				listStore.activeView,
+				filterStore.selectedTag,
+			);
+		}
+		void useTagStore().fetchTags();
+	}
+	async function batchUpdate(options: BatchUpdateOptions): Promise<Task[]> {
 		if (!options.task_ids.length) return [];
+		const priors = options.task_ids
+			.map(
+				(taskId) =>
+					allTasks.value.find((t) => t.id === taskId) ?? tasks.value.find((t) => t.id === taskId),
+			)
+			.filter((t): t is Task => Boolean(t))
+			.map((t) => ({
+				id: t.id,
+				title: t.title,
+				completed: t.completed,
+				due: t.due,
+				list_id: t.list_id,
+				priority: t.priority,
+			}));
 		loading.value = true;
 		error.value = null;
 		try {
@@ -597,6 +817,22 @@ export const useTaskStore = defineStore("tasks", () => {
 			if (options.completed !== undefined) {
 				void useTagStore().fetchTags();
 			}
+			recordUndo(describeBatch(options, priors.length, priors[0]?.title ?? "task"), async () => {
+				for (const prior of priors) {
+					if (options.completed !== undefined && prior.completed !== options.completed) {
+						await toggleTask(prior.id, prior.completed);
+					}
+					const revert: UpdateTaskInput = { id: prior.id };
+					if (options.due !== undefined || options.postpone_days !== undefined) {
+						revert.due = prior.due;
+					}
+					if (options.list_id !== undefined) revert.list_id = prior.list_id;
+					if (options.priority !== undefined) revert.priority = prior.priority;
+					if (Object.keys(revert).length > 1) {
+						await updateTask(revert, { debounceMs: 0 });
+					}
+				}
+			});
 			return updated;
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
@@ -626,6 +862,11 @@ export const useTaskStore = defineStore("tasks", () => {
 		tasks,
 		allTasks,
 		activeTaskId,
+		selectedTaskIds,
+		toggleSelectTask,
+		setSelectedTaskIds,
+		clearSelection,
+		selectRange,
 		loading,
 		error,
 		includeCompleted,
@@ -641,6 +882,9 @@ export const useTaskStore = defineStore("tasks", () => {
 		countAll,
 		countTrash,
 		countOverdue,
+		countNextActions,
+		countWaitingOn,
+		countSomedayMaybe,
 		filteredTasks,
 		getListCount,
 		getListOverdueCount,
@@ -653,6 +897,8 @@ export const useTaskStore = defineStore("tasks", () => {
 		toggleTask,
 		updateTask,
 		deleteTask,
+		restoreTask,
+		batchRestore,
 		query,
 		sort,
 		batchUpdate,

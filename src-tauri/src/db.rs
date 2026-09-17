@@ -18,33 +18,11 @@ pub struct Migration {
     pub sql: &'static str,
 }
 
-pub const MIGRATIONS: &[Migration] = &[
-    Migration {
-        version: 1,
-        name: "0001_initial_schema",
-        sql: include_str!("../migrations/0001_initial_schema.sql"),
-    },
-    Migration {
-        version: 2,
-        name: "0002_opentask_alignment",
-        sql: include_str!("../migrations/0002_opentask_alignment.sql"),
-    },
-    Migration {
-        version: 3,
-        name: "0003_default_inbox",
-        sql: include_str!("../migrations/0003_default_inbox.sql"),
-    },
-    Migration {
-        version: 4,
-        name: "0004_list_icon",
-        sql: include_str!("../migrations/0004_list_icon.sql"),
-    },
-    Migration {
-        version: 5,
-        name: "0005_freeform_coordinates",
-        sql: include_str!("../migrations/0005_freeform_coordinates.sql"),
-    },
-];
+pub const MIGRATIONS: &[Migration] = &[Migration {
+    version: 1,
+    name: "0001_initial_schema",
+    sql: include_str!("../migrations/0001_initial_schema.sql"),
+}];
 
 pub async fn ensure_default_inbox(
     conn: &Connection,
@@ -67,6 +45,82 @@ pub async fn ensure_default_inbox(
         params![id.clone(), now],
     ).await?;
     Ok(id)
+}
+
+pub async fn ensure_default_gtd_lists(
+    conn: &Connection,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let defaults = [
+        (
+            "00000000-0000-0000-0000-000000000002",
+            "Next actions",
+            "#f59e0b",
+            1,
+        ),
+        (
+            "00000000-0000-0000-0000-000000000003",
+            "Waiting on",
+            "#f97316",
+            2,
+        ),
+        (
+            "00000000-0000-0000-0000-000000000004",
+            "Someday/Maybe",
+            "#eab308",
+            3,
+        ),
+    ];
+
+    for (id, name, color, pos) in defaults {
+        let mut rows = conn
+            .query(
+                "SELECT id FROM lists WHERE lower(name) = ?1 AND deleted_at IS NULL LIMIT 1",
+                params![name.to_lowercase()],
+            )
+            .await?;
+        if rows.next().await?.is_none() {
+            conn.execute(
+                "INSERT OR IGNORE INTO lists (id, name, color, position, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+                params![id, name, color, pos, now.clone()],
+            )
+            .await?;
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn ensure_default_gtd_tags(
+    conn: &Connection,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let default_tags = [
+        ("00000000-0000-0000-0001-000000000001", "@home", "#22c55e"),
+        ("00000000-0000-0000-0001-000000000002", "@work", "#3b82f6"),
+        ("00000000-0000-0000-0001-000000000003", "@school", "#a855f7"),
+        ("00000000-0000-0000-0001-000000000004", "@errands", "#eab308"),
+        ("00000000-0000-0000-0001-000000000005", "@computer", "#06b6d4"),
+        ("00000000-0000-0000-0001-000000000006", "@calls", "#f43f5e"),
+    ];
+
+    for (id, name, color) in default_tags {
+        let mut rows = conn
+            .query(
+                "SELECT id FROM tags WHERE lower(name) = ?1 AND deleted_at IS NULL LIMIT 1",
+                params![name.to_lowercase()],
+            )
+            .await?;
+        if rows.next().await?.is_none() {
+            conn.execute(
+                "INSERT OR IGNORE INTO tags (id, name, color, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?4)",
+                params![id, name, color, now.clone()],
+            )
+            .await?;
+        }
+    }
+
+    Ok(())
 }
 
 pub async fn run_migrations(
@@ -117,6 +171,11 @@ pub async fn init_db(db_path: &Path) -> Result<DbState, Box<dyn std::error::Erro
 
     run_migrations(&conn).await?;
     ensure_default_inbox(&conn).await?;
+    ensure_default_gtd_lists(&conn).await?;
+    ensure_default_gtd_tags(&conn).await?;
+    if let Err(e) = crate::commands::tasks::purge_old_deleted_tasks_impl(&conn, 30).await {
+        eprintln!("Purge of old deleted tasks failed: {e}");
+    }
 
     Ok(DbState {
         db: Arc::new(db),
@@ -165,11 +224,62 @@ mod tests {
             );
             assert!(tables.contains(&"notes".to_string()), "notes missing");
 
-            // Verify idempotence: running init_db / migrations a second time succeeds
+
+            // Verify default GTD context tags
+            let expected_tags = ["@calls", "@computer", "@errands", "@home", "@school", "@work"];
+            let mut tag_rows = state
+                .conn
+                .query("SELECT name FROM tags WHERE deleted_at IS NULL ORDER BY name ASC", ())
+                .await
+                .expect("query tags failed");
+            let mut actual_tags = Vec::new();
+            while let Some(row) = tag_rows.next().await.unwrap() {
+                let name: String = row.get(0).unwrap();
+                actual_tags.push(name);
+            }
+            assert_eq!(actual_tags, expected_tags);
+
+            // Verify default tasks and links
+            let mut task_rows = state
+                .conn
+                .query("SELECT COUNT(*) FROM tasks WHERE deleted_at IS NULL", ())
+                .await
+                .expect("query tasks failed");
+            let task_count: i64 = task_rows.next().await.unwrap().unwrap().get(0).unwrap();
+            assert_eq!(task_count, 6);
+
+            let mut tt_rows = state
+                .conn
+                .query("SELECT COUNT(*) FROM task_tags WHERE deleted_at IS NULL", ())
+                .await
+                .expect("query task_tags failed");
+            let tt_count: i64 = tt_rows.next().await.unwrap().unwrap().get(0).unwrap();
+            assert_eq!(tt_count, 6);
+            // Soft-delete one demo task to verify ensure_default_gtd_tags doesn't resurrect it
+            state
+                .conn
+                .execute(
+                    "UPDATE tasks SET deleted_at = datetime('now') WHERE id = '00000000-0000-0000-0002-000000000001'",
+                    (),
+                )
+                .await
+                .expect("soft delete demo task");
+
+            // Re-running ensure_default_gtd_tags (simulating app restart) must not resurrect tasks
+            ensure_default_gtd_tags(&state.conn)
+                .await
+                .expect("ensure_default_gtd_tags rerun");
             run_migrations(&state.conn)
                 .await
                 .expect("idempotent migration run failed");
 
+            let mut active_task_rows = state
+                .conn
+                .query("SELECT COUNT(*) FROM tasks WHERE deleted_at IS NULL", ())
+                .await
+                .expect("query active tasks count");
+            let active_task_count: i64 = active_task_rows.next().await.unwrap().unwrap().get(0).unwrap();
+            assert_eq!(active_task_count, 5);
             // Clean up
             let _ = std::fs::remove_dir_all(temp_dir);
         });

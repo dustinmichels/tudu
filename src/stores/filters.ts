@@ -122,3 +122,5 @@ export const useFilterStore = defineStore("filters", () => {
 		resetFilters,
 	};
 });
+
+export type FilterStore = ReturnType<typeof useFilterStore>;

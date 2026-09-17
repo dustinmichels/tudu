@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import {
 	AlertCircle,
+	AtSign,
 	Calendar,
 	CalendarDays,
 	CheckSquare,
+	Clock,
 	Command,
 	Folder,
 	Inbox,
 	Keyboard,
+	Lightbulb,
 	List,
 	ListFilter,
 	ListTree,
@@ -20,6 +23,7 @@ import {
 	Tag as TagIcon,
 	Trash2,
 	Upload,
+	Zap,
 } from "lucide-vue-next";
 import { type Component, computed, nextTick, ref, watch } from "vue";
 import { useFilterStore } from "../stores/filters.ts";
@@ -27,6 +31,7 @@ import { type DefaultView, useListStore } from "../stores/lists.ts";
 import { useTagStore } from "../stores/tags.ts";
 import { useTaskStore } from "../stores/tasks.ts";
 import { useUIStore } from "../stores/ui.ts";
+import { formatTagLabel } from "../utils/smartAdd.ts";
 
 const filterStore = useFilterStore();
 const listStore = useListStore();
@@ -76,13 +81,15 @@ const commands = computed<CommandItem[]>(() => {
 		const smartViews: { id: DefaultView; name: string; icon: Component; shortcut?: string }[] = [
 			{ id: "inbox", name: "Inbox", icon: Inbox },
 			{ id: "all", name: "All Tasks", icon: CheckSquare },
+			{ id: "next_actions", name: "Next actions", icon: Zap },
+			{ id: "waiting_on", name: "Waiting on", icon: Clock },
+			{ id: "someday_maybe", name: "Someday/Maybe", icon: Lightbulb },
 			{ id: "today", name: "Today", icon: Calendar },
 			{ id: "tomorrow", name: "Tomorrow", icon: Calendar },
-			{ id: "this_week", name: "This Week", icon: Calendar },
+			{ id: "this_week", name: "Next Week", icon: Calendar },
 			{ id: "overdue", name: "Overdue", icon: AlertCircle },
 			{ id: "trash", name: "Trash", icon: Trash2 },
 		];
-
 		for (const sv of smartViews) {
 			items.push({
 				id: `view-${sv.id}`,
@@ -113,11 +120,14 @@ const commands = computed<CommandItem[]>(() => {
 		}
 
 		for (const tag of tagStore.tags) {
+			const isContext = tag.name.startsWith("@");
 			items.push({
 				id: `tag-${tag.id}`,
-				title: `Filter by Tag: #${tag.name}`,
-				category: "Tags",
-				icon: TagIcon,
+				title: isContext
+					? `Filter by Context: ${tag.name}`
+					: `Filter by Tag: ${formatTagLabel(tag.name)}`,
+				category: isContext ? "Contexts" : "Tags",
+				icon: isContext ? AtSign : TagIcon,
 				action: () => {
 					listStore.setActiveView(null);
 					listStore.setActiveList(null);
@@ -358,9 +368,12 @@ const commands = computed<CommandItem[]>(() => {
 	for (const sv of [
 		{ id: "inbox" as DefaultView, name: "Inbox", icon: Inbox },
 		{ id: "all" as DefaultView, name: "All Tasks", icon: CheckSquare },
+		{ id: "next_actions" as DefaultView, name: "Next actions", icon: Zap },
+		{ id: "waiting_on" as DefaultView, name: "Waiting on", icon: Clock },
+		{ id: "someday_maybe" as DefaultView, name: "Someday/Maybe", icon: Lightbulb },
 		{ id: "today" as DefaultView, name: "Today", icon: Calendar },
 		{ id: "tomorrow" as DefaultView, name: "Tomorrow", icon: Calendar },
-		{ id: "this_week" as DefaultView, name: "This Week", icon: Calendar },
+		{ id: "this_week" as DefaultView, name: "Next Week", icon: Calendar },
 		{ id: "overdue" as DefaultView, name: "Overdue", icon: AlertCircle },
 		{ id: "trash" as DefaultView, name: "Trash", icon: Trash2 },
 	]) {

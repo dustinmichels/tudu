@@ -1,6 +1,14 @@
 <script setup lang="ts">
-import { Calendar, CornerDownLeft, Flag, FolderInput, Tag as TagIcon } from "lucide-vue-next";
+import {
+	AtSign,
+	Calendar,
+	CornerDownLeft,
+	Flag,
+	FolderInput,
+	Tag as TagIcon,
+} from "lucide-vue-next";
 import { computed, ref } from "vue";
+import { formatTagLabel } from "../../utils/smartAdd.ts";
 import { useSmartAddInput } from "../../composables/useSmartAddInput.ts";
 import { useFilterStore } from "../../stores/filters.ts";
 import { useListStore } from "../../stores/lists.ts";
@@ -35,19 +43,24 @@ const {
 const activeList = computed(() => listStore.activeList);
 
 const viewTitle = computed(() => {
-	if (filterStore.selectedTag) return `#${filterStore.selectedTag}`;
+	if (filterStore.selectedTag) return formatTagLabel(filterStore.selectedTag);
 	if (listStore.activeView === "inbox") return "Inbox";
 	if (listStore.activeView === "all") return "All Tasks";
+	if (listStore.activeView === "next_actions") return "Next actions";
+	if (listStore.activeView === "waiting_on") return "Waiting on";
+	if (listStore.activeView === "someday_maybe") return "Someday/Maybe";
 	if (listStore.activeView === "today") return "Today";
 	if (listStore.activeView === "tomorrow") return "Tomorrow";
-	if (listStore.activeView === "this_week") return "This Week";
+	if (listStore.activeView === "this_week") return "Next Week";
 	if (listStore.activeView === "overdue") return "Overdue";
 	if (listStore.activeView === "trash") return "Trash";
 	return null;
 });
 
 const quickAddPlaceholder = computed(() => {
-	if (filterStore.selectedTag) return `Add a task tagged #${filterStore.selectedTag}...`;
+	if (filterStore.selectedTag) {
+		return `Add a task tagged ${formatTagLabel(filterStore.selectedTag)}...`;
+	}
 	if (viewTitle.value) return `Add a task to ${viewTitle.value}...`;
 	return activeList.value ? `Add a task to ${activeList.value.name}...` : "Add a task...";
 });
@@ -104,6 +117,7 @@ defineExpose({
 				class="px-2 py-1 text-[11px] font-semibold text-zinc-400 uppercase tracking-wider flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800"
 			>
 				<span v-if="activeSmartToken?.prefix === '#'">Tags & Lists (#)</span>
+				<span v-else-if="activeSmartToken?.prefix === '@'">Contexts (@)</span>
 				<span v-else-if="activeSmartToken?.prefix === '^'">Due Dates (^)</span>
 				<span v-else-if="activeSmartToken?.prefix === '!'">Priority (!)</span>
 				<span class="text-[10px] font-normal normal-case text-zinc-400"
@@ -124,7 +138,8 @@ defineExpose({
 					]"
 				>
 					<div class="flex items-center gap-2 min-w-0">
-						<TagIcon v-if="item.type === 'tag'" class="w-3.5 h-3.5 text-purple-500 shrink-0" />
+						<AtSign v-if="item.type === 'context'" class="w-3.5 h-3.5 text-amber-500 shrink-0" />
+						<TagIcon v-else-if="item.type === 'tag'" class="w-3.5 h-3.5 text-purple-500 shrink-0" />
 						<FolderInput
 							v-else-if="item.type === 'list'"
 							class="w-3.5 h-3.5 text-emerald-500 shrink-0"
@@ -156,6 +171,15 @@ defineExpose({
 			<span class="text-[10px] uppercase font-semibold tracking-wider text-zinc-400/80"
 				>Shortcuts:</span
 			>
+			<button
+				type="button"
+				@click="appendSmartPrefix('@')"
+				class="hover:text-amber-600 dark:hover:text-amber-400 font-mono flex items-center gap-0.5 cursor-pointer"
+				title="Add context tag (@home, @calls, etc.)"
+			>
+				<span class="font-bold">@</span>context
+			</button>
+			<span>•</span>
 			<button
 				type="button"
 				@click="appendSmartPrefix('#')"

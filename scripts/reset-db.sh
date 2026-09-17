@@ -32,7 +32,7 @@ print_usage() {
     echo -e "${BOLD}Usage:${RESET} $(basename "$0") [OPTIONS]"
     echo ""
     echo -e "${BOLD}Options:${RESET}"
-    echo -e "  -s, --seed         Insert starter seed data (default Inbox list and sample tasks)"
+    echo -e "  -s, --seed         Note: Starter GTD lists, tags, and tasks are built into base schema"
     echo -e "  -n, --no-migrate   Wipe database files without applying schema migrations"
     echo -e "  -p, --path <PATH>  Target a custom database file path instead of default location"
     echo -e "  -f, --force        Force reset without prompts, even if TuDu is detected running"
@@ -223,59 +223,7 @@ EOF
     # Optional seed data
     if [[ "$SEED_DATA" = true ]]; then
         echo ""
-        echo -e "${BLUE}--> Seeding initial development data...${RESET}"
-        
-        # UUID generator helper
-        gen_uuid() {
-            if command -v uuidgen >/dev/null 2>&1; then
-                uuidgen | tr '[:upper:]' '[:lower:]'
-            else
-                python3 -c "import uuid; print(uuid.uuid4())"
-            fi
-        }
-
-        INBOX_LIST_ID="$(gen_uuid)"
-        WORK_LIST_ID="$(gen_uuid)"
-        PERSONAL_LIST_ID="$(gen_uuid)"
-        TASK_1_ID="$(gen_uuid)"
-        TASK_2_ID="$(gen_uuid)"
-        TASK_3_ID="$(gen_uuid)"
-        TAG_1_ID="$(gen_uuid)"
-        TAG_2_ID="$(gen_uuid)"
-        NOTE_1_ID="$(gen_uuid)"
-        NOW_ISO="$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")"
-        TOMORROW_ISO="$(date -u -v+1d +"%Y-%m-%dT12:00:00.000Z" 2>/dev/null || date -u -d "+1 day" +"%Y-%m-%dT12:00:00.000Z" 2>/dev/null || echo "$NOW_ISO")"
-
-        sqlite3 "$TARGET_DB_PATH" << EOF
--- Lists
-INSERT INTO lists (id, name, color, position, created_at, updated_at) VALUES
-    ('$INBOX_LIST_ID', 'Inbox', '#4F46E5', 0, '$NOW_ISO', '$NOW_ISO'),
-    ('$WORK_LIST_ID', 'Work', '#F59E0B', 1, '$NOW_ISO', '$NOW_ISO'),
-    ('$PERSONAL_LIST_ID', 'Personal', '#10B981', 2, '$NOW_ISO', '$NOW_ISO');
-
--- Tags
-INSERT INTO tags (id, name, color, created_at, updated_at) VALUES
-    ('$TAG_1_ID', 'starter', '#6366F1', '$NOW_ISO', '$NOW_ISO'),
-    ('$TAG_2_ID', 'priority', '#EF4444', '$NOW_ISO', '$NOW_ISO');
-
--- Tasks
-INSERT INTO tasks (id, list_id, title, due, priority, completed, created_at, updated_at) VALUES
-    ('$TASK_1_ID', '$INBOX_LIST_ID', 'Welcome to TuDu! 🚀', '$NOW_ISO', 1, 0, '$NOW_ISO', '$NOW_ISO'),
-    ('$TASK_2_ID', '$INBOX_LIST_ID', 'Explore task filtering and keyboard shortcuts', '$TOMORROW_ISO', 2, 0, '$NOW_ISO', '$NOW_ISO'),
-    ('$TASK_3_ID', '$PERSONAL_LIST_ID', 'Take a break and stretch', NULL, 3, 0, '$NOW_ISO', '$NOW_ISO');
-
--- Task Tags
-INSERT INTO task_tags (task_id, tag_id, created_at, updated_at) VALUES
-    ('$TASK_1_ID', '$TAG_1_ID', '$NOW_ISO', '$NOW_ISO'),
-    ('$TASK_2_ID', '$TAG_2_ID', '$NOW_ISO', '$NOW_ISO');
-
--- Notes
-INSERT INTO notes (id, task_id, title, content, created_at, updated_at) VALUES
-    ('$NOTE_1_ID', '$TASK_1_ID', 'Getting Started', 'TuDu is a local-first task manager with embedded libSQL/SQLite storage.', '$NOW_ISO', '$NOW_ISO');
-EOF
-        echo "    Created 3 lists (Inbox, Work, Personal)"
-        echo "    Created 2 tags (starter, priority)"
-        echo "    Created 3 sample tasks with notes"
+        echo -e "${BLUE}--> Starter GTD lists, context tags, and tasks are already included in baseline schema.${RESET}"
     fi
 
     # Verify tables

@@ -8,6 +8,7 @@ import { useTaskStore } from "../stores/tasks.ts";
 import {
 	type ActiveSmartToken,
 	detectSmartToken,
+	getContextSuggestions,
 	getDueSuggestions,
 	getPrioritySuggestions,
 	getTagAndListSuggestions,
@@ -100,6 +101,9 @@ export function useSmartAddInput(options: UseSmartAddInputOptions = {}) {
 			const tagNames = tagStore.tagsWithCounts.map((t) => t.name);
 			const listNames = listStore.lists.map((l) => l.name);
 			smartSuggestions.value = getTagAndListSuggestions(tagNames, listNames, token.query);
+		} else if (token.prefix === "@") {
+			const tagNames = tagStore.tagsWithCounts.map((t) => t.name);
+			smartSuggestions.value = getContextSuggestions(tagNames, token.query);
 		} else if (token.prefix === "^") {
 			smartSuggestions.value = getDueSuggestions(token.query);
 		} else if (token.prefix === "!") {
@@ -204,7 +208,16 @@ export function useSmartAddInput(options: UseSmartAddInputOptions = {}) {
 			if (matched) targetListId = matched.id;
 		}
 		if (!targetListId) {
-			targetListId = listStore.activeList?.id ?? listStore.inboxList?.id ?? listStore.lists[0]?.id;
+			if (listStore.activeView === "next_actions" && listStore.nextActionsList) {
+				targetListId = listStore.nextActionsList.id;
+			} else if (listStore.activeView === "waiting_on" && listStore.waitingOnList) {
+				targetListId = listStore.waitingOnList.id;
+			} else if (listStore.activeView === "someday_maybe" && listStore.somedayMaybeList) {
+				targetListId = listStore.somedayMaybeList.id;
+			} else {
+				targetListId =
+					listStore.activeList?.id ?? listStore.inboxList?.id ?? listStore.lists[0]?.id;
+			}
 		}
 		if (!targetListId) return null;
 

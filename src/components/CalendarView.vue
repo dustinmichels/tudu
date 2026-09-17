@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import {
 	AlertCircle,
+	AtSign,
 	Calendar,
 	CalendarDays,
 	CalendarRange,
 	CheckSquare,
 	ChevronLeft,
 	ChevronRight,
+	Clock,
 	Inbox,
+	Lightbulb,
 	ListFilter,
 	ListTree,
 	Menu,
@@ -16,6 +19,7 @@ import {
 	Sunrise,
 	Tag as TagIcon,
 	Trash2,
+	Zap,
 } from "lucide-vue-next";
 import { computed, onMounted, ref } from "vue";
 import type { Task } from "../models/index.ts";
@@ -25,6 +29,7 @@ import { useListStore } from "../stores/lists.ts";
 import { useTaskStore } from "../stores/tasks.ts";
 import { useUIStore } from "../stores/ui.ts";
 import { getListIcon } from "../utils/icons.ts";
+import { formatTagLabel } from "../utils/smartAdd.ts";
 
 const filterStore = useFilterStore();
 const listStore = useListStore();
@@ -53,12 +58,15 @@ const hasActiveSelection = computed(
 );
 
 const viewTitle = computed(() => {
-	if (filterStore.selectedTag) return `#${filterStore.selectedTag}`;
+	if (filterStore.selectedTag) return formatTagLabel(filterStore.selectedTag);
 	if (listStore.activeView === "inbox") return "Inbox";
 	if (listStore.activeView === "all") return "All Tasks";
+	if (listStore.activeView === "next_actions") return "Next actions";
+	if (listStore.activeView === "waiting_on") return "Waiting on";
+	if (listStore.activeView === "someday_maybe") return "Someday/Maybe";
 	if (listStore.activeView === "today") return "Today";
 	if (listStore.activeView === "tomorrow") return "Tomorrow";
-	if (listStore.activeView === "this_week") return "This Week";
+	if (listStore.activeView === "this_week") return "Next Week";
 	if (listStore.activeView === "overdue") return "Overdue";
 	if (listStore.activeView === "trash") return "Trash";
 	return null;
@@ -283,7 +291,14 @@ onMounted(async () => {
 
 				<div class="min-w-0">
 					<h2 class="text-lg sm:text-xl font-bold truncate flex items-center gap-2">
-						<TagIcon v-if="filterStore.selectedTag" class="w-5 h-5 text-emerald-500 shrink-0" />
+						<AtSign
+							v-if="filterStore.selectedTag && filterStore.selectedTag.startsWith('@')"
+							class="w-5 h-5 text-amber-500 shrink-0"
+						/>
+						<TagIcon
+							v-else-if="filterStore.selectedTag"
+							class="w-5 h-5 text-emerald-500 shrink-0"
+						/>
 						<Inbox
 							v-else-if="
 								(activeList && activeList.name.toLowerCase() === 'inbox') ||
@@ -294,6 +309,18 @@ onMounted(async () => {
 						<CheckSquare
 							v-else-if="listStore.activeView === 'all'"
 							class="w-5 h-5 text-indigo-500 shrink-0"
+						/>
+						<Zap
+							v-else-if="listStore.activeView === 'next_actions'"
+							class="w-5 h-5 text-amber-500 shrink-0"
+						/>
+						<Clock
+							v-else-if="listStore.activeView === 'waiting_on'"
+							class="w-5 h-5 text-orange-500 shrink-0"
+						/>
+						<Lightbulb
+							v-else-if="listStore.activeView === 'someday_maybe'"
+							class="w-5 h-5 text-yellow-500 shrink-0"
 						/>
 						<Calendar
 							v-else-if="listStore.activeView === 'today'"

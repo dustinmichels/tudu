@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
 	detectSmartToken,
+	getContextSuggestions,
 	getDueSuggestions,
 	getPrioritySuggestions,
 	getTagAndListSuggestions,
@@ -85,6 +86,26 @@ describe("Smart Add Parser and Helpers", () => {
 			});
 		});
 
+		it("detects @ context token at end of input", () => {
+			const token = detectSmartToken("Fix leaky faucet @hom", 21);
+			expect(token).toEqual({
+				prefix: "@",
+				query: "hom",
+				startIndex: 17,
+				endIndex: 21,
+			});
+		});
+
+		it("detects bare @ at start of input", () => {
+			const token = detectSmartToken("@", 1);
+			expect(token).toEqual({
+				prefix: "@",
+				query: "",
+				startIndex: 0,
+				endIndex: 1,
+			});
+		});
+
 		it("ignores # inside a word like C# or foo#bar", () => {
 			expect(detectSmartToken("Learn C#", 8)).toBeNull();
 			expect(detectSmartToken("foo#bar", 7)).toBeNull();
@@ -124,6 +145,39 @@ describe("Smart Add Parser and Helpers", () => {
 			expect(suggestions.some((s) => s.label === "finances" && s.description === "New tag")).toBe(
 				true,
 			);
+		});
+	});
+
+	describe("getContextSuggestions", () => {
+		const gtdTags = ["@home", "@work", "@school", "@errands", "@computer", "@calls"];
+
+		it("suggests matching context tags", () => {
+			const suggestions = getContextSuggestions(gtdTags, "calls");
+			expect(suggestions.length).toBe(1);
+			expect(suggestions[0].label).toBe("@calls");
+			expect(suggestions[0].insertValue).toBe("calls");
+			expect(suggestions[0].badge).toBe("@calls");
+			expect(suggestions[0].type).toBe("context");
+		});
+
+		it("suggests both partial match and new context option when query is partial", () => {
+			const suggestions = getContextSuggestions(gtdTags, "call");
+			expect(suggestions.length).toBe(2);
+			expect(suggestions[0].label).toBe("@calls");
+			expect(suggestions[1].label).toBe("@call");
+			expect(suggestions[1].description).toBe("New context");
+		});
+
+		it("suggests all context tags when query is empty", () => {
+			const suggestions = getContextSuggestions(gtdTags, "");
+			expect(suggestions.length).toBe(6);
+		});
+
+		it("suggests creating a new context when query has no match", () => {
+			const suggestions = getContextSuggestions(gtdTags, "deep work");
+			expect(suggestions.some((s) => s.label === "@deep work")).toBe(true);
+			const newContext = suggestions.find((s) => s.label === "@deep work");
+			expect(newContext?.insertValue).toBe('"deep work"');
 		});
 	});
 
@@ -184,6 +238,29 @@ describe("Smart Add Parser and Helpers", () => {
 			const parsed = parseSmartAdd("Task with !none priority", [], fixedBase);
 			expect(parsed.title).toBe("Task with priority");
 			expect(parsed.priority).toBeUndefined();
+		});
+
+		it("parses @context tokens into tags with leading @", () => {
+			const parsed = parseSmartAdd("Fix leaky kitchen faucet @home ^today !2", [], fixedBase);
+			expect(parsed.title).toBe("Fix leaky kitchen faucet");
+			expect(parsed.tags).toEqual(["@home"]);
+			expect(parsed.due).toBe("2026-09-10");
+			expect(parsed.priority).toBe(2);
+		});
+
+		it("handles multiple contexts and mixed #tags and @contexts", () => {
+			const parsed = parseSmartAdd("Write report @work @computer #q3-goals", ["Work"], fixedBase);
+			expect(parsed.title).toBe("Write report");
+			expect(parsed.tags).toContain("@work");
+			expect(parsed.tags).toContain("@computer");
+			expect(parsed.tags).toContain("q3-goals");
+		});
+
+		it("handles quoted context names with spaces", () => {
+			const parsed = parseSmartAdd('Refactor auth module @"deep focus" ^tomorrow', [], fixedBase);
+			expect(parsed.title).toBe("Refactor auth module");
+			expect(parsed.tags).toEqual(["@deep focus"]);
+			expect(parsed.due).toBe("2026-09-11");
 		});
 	});
 });

@@ -75,7 +75,28 @@ mock.module("@tauri-apps/api/core", () => ({
 				},
 			];
 		}
-		if (command === "get_tags") return [];
+		if (command === "get_tags" || command === "get_tags_with_counts") {
+			return [
+				{
+					id: "tag-home",
+					name: "@home",
+					color: "#22c55e",
+					task_count: 0,
+					deleted_at: null,
+					created_at: new Date().toISOString(),
+					updated_at: new Date().toISOString(),
+				},
+				{
+					id: "tag-work",
+					name: "@work",
+					color: "#3b82f6",
+					task_count: 0,
+					deleted_at: null,
+					created_at: new Date().toISOString(),
+					updated_at: new Date().toISOString(),
+				},
+			];
+		}
 		return null;
 	},
 }));
@@ -230,5 +251,44 @@ describe("useSmartAddInput", () => {
 		expect(created?.list_id).toBe("work");
 		expect(successCalled).toBe(true);
 		expect(inputText.value).toBe(""); // cleared on success
+	});
+
+	it("opens dropdown with context suggestions when typing @", () => {
+		const fakeInput = createMockInput("Fix sink @");
+		const inputRef = ref(fakeInput);
+		const { inputText, updateSmartDropdown, isSmartMenuOpen, activeSmartToken, smartSuggestions } =
+			useSmartAddInput({ inputRef });
+
+		inputText.value = "Fix sink @";
+		fakeInput.value = inputText.value;
+		fakeInput.selectionStart = 10;
+		updateSmartDropdown();
+
+		expect(isSmartMenuOpen.value).toBe(true);
+		expect(activeSmartToken.value?.prefix).toBe("@");
+		expect(smartSuggestions.value.length).toBeGreaterThan(0);
+	});
+
+	it("selects context suggestion and assigns @context tag on submit", async () => {
+		const fakeInput = createMockInput("Call mechanic @cal");
+		const inputRef = ref(fakeInput);
+		const { inputText, updateSmartDropdown, selectSmartSuggestion, smartSuggestions, submitTask } =
+			useSmartAddInput({ inputRef });
+
+		inputText.value = "Call mechanic @cal";
+		fakeInput.value = inputText.value;
+		fakeInput.selectionStart = 18;
+		updateSmartDropdown();
+
+		const contextSuggestion = smartSuggestions.value.find((s) => s.label.includes("cal"));
+		expect(contextSuggestion).toBeDefined();
+		selectSmartSuggestion(contextSuggestion!);
+
+		expect(inputText.value).toContain("Call mechanic @");
+
+		const created = await submitTask();
+		expect(created).not.toBeNull();
+		expect(created?.title).toBe("Call mechanic");
+		expect(assignedTags).toContainEqual({ taskId: created!.id, tagId: "tag-@cal" });
 	});
 });

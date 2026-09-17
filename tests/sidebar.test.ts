@@ -260,4 +260,88 @@ describe("Left Sidebar (Navigation & Lists)", () => {
 			expect(listStore.activeView).toBeNull();
 		});
 	});
+
+	describe("5. GTD special lists and customLists filtering", () => {
+		test("customLists excludes Inbox and GTD lists (Next actions, Waiting on, Someday/Maybe)", () => {
+			const listStore = useListStore();
+
+			listStore.lists = [
+				{
+					id: "inbox-1",
+					name: "Inbox",
+					color: null,
+					position: 0,
+					created_at: "2026-09-10T00:00:00Z",
+					updated_at: "2026-09-10T00:00:00Z",
+					deleted_at: null,
+				},
+				{
+					id: "next-1",
+					name: "Next actions",
+					color: "#f59e0b",
+					position: 1,
+					created_at: "2026-09-10T00:00:00Z",
+					updated_at: "2026-09-10T00:00:00Z",
+					deleted_at: null,
+				},
+				{
+					id: "wait-1",
+					name: "Waiting on",
+					color: "#f97316",
+					position: 2,
+					created_at: "2026-09-10T00:00:00Z",
+					updated_at: "2026-09-10T00:00:00Z",
+					deleted_at: null,
+				},
+				{
+					id: "someday-1",
+					name: "Someday/Maybe",
+					color: "#eab308",
+					position: 3,
+					created_at: "2026-09-10T00:00:00Z",
+					updated_at: "2026-09-10T00:00:00Z",
+					deleted_at: null,
+				},
+				{
+					id: "work-1",
+					name: "Work",
+					color: "#3b82f6",
+					position: 4,
+					created_at: "2026-09-10T00:00:00Z",
+					updated_at: "2026-09-10T00:00:00Z",
+					deleted_at: null,
+				},
+				{
+					id: "personal-1",
+					name: "Personal",
+					color: "#10b981",
+					position: 5,
+					created_at: "2026-09-10T00:00:00Z",
+					updated_at: "2026-09-10T00:00:00Z",
+					deleted_at: null,
+				},
+			];
+
+			expect(listStore.customLists.map((l) => l.name)).toEqual(["Work", "Personal"]);
+			expect(listStore.nextActionsList?.id).toBe("next-1");
+			expect(listStore.waitingOnList?.id).toBe("wait-1");
+			expect(listStore.somedayMaybeList?.id).toBe("someday-1");
+		});
+
+		test("listStore accepts GTD views: next_actions, waiting_on, and someday_maybe", () => {
+			const listStore = useListStore();
+
+			listStore.setActiveView("next_actions");
+			expect(listStore.activeView).toBe("next_actions");
+			expect(listStore.activeListId).toBeNull();
+
+			listStore.setActiveView("waiting_on");
+			expect(listStore.activeView).toBe("waiting_on");
+			expect(listStore.activeListId).toBeNull();
+
+			listStore.setActiveView("someday_maybe");
+			expect(listStore.activeView).toBe("someday_maybe");
+			expect(listStore.activeListId).toBeNull();
+		});
+	});
 });

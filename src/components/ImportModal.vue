@@ -8,11 +8,13 @@ import { useListStore } from "../stores/lists.ts";
 import { useTagStore } from "../stores/tags.ts";
 import { useTaskStore } from "../stores/tasks.ts";
 import { useUIStore } from "../stores/ui.ts";
+import { useUndoStore } from "../stores/undo.ts";
 
 const uiStore = useUIStore();
 const listStore = useListStore();
 const taskStore = useTaskStore();
 const tagStore = useTagStore();
+const undoStore = useUndoStore();
 
 type ProviderId = "opentask" | "rtm" | "todoist";
 
@@ -111,6 +113,8 @@ async function processFile(file: File) {
 
 		const result = await api.backup.import(openTaskDoc);
 
+		// Imported data replaces ids wholesale: queued inverse operations are stale.
+		undoStore.clear();
 		successMessage.value = `Successfully imported ${result.tasks_imported} tasks across ${result.lists_imported} lists!`;
 
 		// Refresh application stores

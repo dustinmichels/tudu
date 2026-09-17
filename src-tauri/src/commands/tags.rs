@@ -404,7 +404,6 @@ mod tests {
             assert_eq!(tags.len(), 2);
             assert_eq!(tags[0].name, "frontend");
             assert_eq!(tags[1].name, "urgent");
-
             // Duplicate tag creation returns existing tag
             let dup = create_tag_impl(&conn, "urgent".to_string(), None)
                 .await
@@ -560,7 +559,6 @@ mod tests {
             let tags = get_tags_impl(&conn).await.expect("get tags");
             assert_eq!(tags.len(), 1);
             assert_eq!(tags[0].name, "new_feature");
-
             let task_tags = conn
                 .query(
                     "SELECT tag_id FROM task_tags WHERE task_id = ?1 AND deleted_at IS NULL",
@@ -571,7 +569,8 @@ mod tests {
             let mut rows = task_tags;
             let row = rows.next().await.unwrap().expect("has row");
             let assigned_tag_id: String = row.get(0).unwrap();
-            assert_eq!(assigned_tag_id, tags[0].id);
+            let new_feature_tag = tags.iter().find(|t| t.name == "new_feature").unwrap();
+            assert_eq!(assigned_tag_id, new_feature_tag.id);
 
             let _ = std::fs::remove_dir_all(temp_dir);
         });
@@ -600,7 +599,6 @@ mod tests {
             assert_eq!(tags.len(), 1);
             assert_eq!(tags[0].name, "priority");
             assert_eq!(tags[0].task_count, 2);
-
             // Batch remove tag "priority"
             batch_remove_tag_impl(&conn, vec![t1.id.clone(), t2.id.clone()], "priority".to_string())
                 .await
@@ -609,7 +607,6 @@ mod tests {
             let tags_after = get_tags_with_counts_impl(&conn).await.expect("get tags after remove");
             assert_eq!(tags_after.len(), 1);
             assert_eq!(tags_after[0].task_count, 0);
-
             let _ = std::fs::remove_dir_all(temp_dir);
         });
     }

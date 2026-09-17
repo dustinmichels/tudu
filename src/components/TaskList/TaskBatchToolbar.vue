@@ -13,6 +13,7 @@ import {
 } from "lucide-vue-next";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { PRIORITY, type Priority, type Task } from "../../models/index.ts";
+import { formatTagLabel } from "../../utils/smartAdd.ts";
 import { batchAssignTag, batchRemoveTag } from "../../services/api.ts";
 import { useListStore } from "../../stores/lists.ts";
 import { useTagStore } from "../../stores/tags.ts";
@@ -20,12 +21,7 @@ import { useTaskStore } from "../../stores/tasks.ts";
 import { getListIcon } from "../../utils/icons.ts";
 
 const props = defineProps<{
-	selectedTaskIds: Set<string>;
 	visibleTasks: Task[];
-}>();
-
-const emit = defineEmits<{
-	(e: "update:selectedTaskIds", val: Set<string>): void;
 }>();
 
 const listStore = useListStore();
@@ -41,12 +37,12 @@ const customNewTagName = ref("");
 
 const allVisibleSelected = computed(() => {
 	if (!props.visibleTasks.length) return false;
-	return props.visibleTasks.every((t) => props.selectedTaskIds.has(t.id));
+	return props.visibleTasks.every((t) => taskStore.selectedTaskIds.has(t.id));
 });
 
 const someVisibleSelected = computed(() => {
 	return (
-		props.visibleTasks.some((t) => props.selectedTaskIds.has(t.id)) && !allVisibleSelected.value
+		props.visibleTasks.some((t) => taskStore.selectedTaskIds.has(t.id)) && !allVisibleSelected.value
 	);
 });
 
@@ -74,28 +70,28 @@ onUnmounted(() => {
 });
 
 function selectAll() {
-	emit("update:selectedTaskIds", new Set(props.visibleTasks.map((t) => t.id)));
+	taskStore.setSelectedTaskIds(props.visibleTasks.map((t) => t.id));
 	closeDropdowns();
 }
 
 function selectNone() {
-	emit("update:selectedTaskIds", new Set());
+	taskStore.clearSelection();
 	closeDropdowns();
 }
 
 function selectInvert() {
 	const next = new Set<string>();
 	for (const task of props.visibleTasks) {
-		if (!props.selectedTaskIds.has(task.id)) {
+		if (!taskStore.selectedTaskIds.has(task.id)) {
 			next.add(task.id);
 		}
 	}
-	emit("update:selectedTaskIds", next);
+	taskStore.setSelectedTaskIds(next);
 	closeDropdowns();
 }
 
 async function handleBatchComplete() {
-	const ids = Array.from(props.selectedTaskIds);
+	const ids = Array.from(taskStore.selectedTaskIds);
 	if (!ids.length) return;
 	isBatchOperating.value = true;
 	try {
@@ -103,7 +99,7 @@ async function handleBatchComplete() {
 			task_ids: ids,
 			completed: true,
 		});
-		emit("update:selectedTaskIds", new Set());
+		taskStore.clearSelection();
 	} catch (err) {
 		console.error("Failed to batch complete tasks:", err);
 	} finally {
@@ -113,7 +109,7 @@ async function handleBatchComplete() {
 }
 
 async function handleBatchPostpone(days: number) {
-	const ids = Array.from(props.selectedTaskIds);
+	const ids = Array.from(taskStore.selectedTaskIds);
 	if (!ids.length) return;
 	isBatchOperating.value = true;
 	try {
@@ -130,7 +126,7 @@ async function handleBatchPostpone(days: number) {
 }
 
 async function handleBatchCustomDate() {
-	const ids = Array.from(props.selectedTaskIds);
+	const ids = Array.from(taskStore.selectedTaskIds);
 	const dateVal = customPostponeDate.value.trim();
 	if (!ids.length || !dateVal) return;
 	isBatchOperating.value = true;
@@ -149,7 +145,7 @@ async function handleBatchCustomDate() {
 }
 
 async function handleBatchSetPriority(priority: Priority | null) {
-	const ids = Array.from(props.selectedTaskIds);
+	const ids = Array.from(taskStore.selectedTaskIds);
 	if (!ids.length) return;
 	isBatchOperating.value = true;
 	try {
@@ -166,7 +162,7 @@ async function handleBatchSetPriority(priority: Priority | null) {
 }
 
 async function handleBatchMoveToList(listId: string) {
-	const ids = Array.from(props.selectedTaskIds);
+	const ids = Array.from(taskStore.selectedTaskIds);
 	if (!ids.length) return;
 	isBatchOperating.value = true;
 	try {
@@ -174,7 +170,7 @@ async function handleBatchMoveToList(listId: string) {
 			task_ids: ids,
 			list_id: listId,
 		});
-		emit("update:selectedTaskIds", new Set());
+		taskStore.clearSelection();
 	} catch (err) {
 		console.error("Failed to batch move tasks to list:", err);
 	} finally {
@@ -185,7 +181,7 @@ async function handleBatchMoveToList(listId: string) {
 
 async function handleBatchAssignTag(tagName: string) {
 	const trimmed = tagName.trim();
-	const ids = Array.from(props.selectedTaskIds);
+	const ids = Array.from(taskStore.selectedTaskIds);
 	if (!ids.length || !trimmed) return;
 	isBatchOperating.value = true;
 	try {
@@ -204,7 +200,7 @@ async function handleBatchAssignTag(tagName: string) {
 }
 
 async function handleBatchRemoveTag(tagName: string) {
-	const ids = Array.from(props.selectedTaskIds);
+	const ids = Array.from(taskStore.selectedTaskIds);
 	if (!ids.length || !tagName.trim()) return;
 	isBatchOperating.value = true;
 	try {
@@ -220,7 +216,7 @@ async function handleBatchRemoveTag(tagName: string) {
 }
 
 async function handleBatchDelete() {
-	const ids = Array.from(props.selectedTaskIds);
+	const ids = Array.from(taskStore.selectedTaskIds);
 	if (!ids.length) return;
 	const confirmDelete = window.confirm(
 		`Delete ${ids.length} selected task${ids.length > 1 ? "s" : ""}?`,
@@ -230,7 +226,7 @@ async function handleBatchDelete() {
 	isBatchOperating.value = true;
 	try {
 		await taskStore.batchDelete(ids);
-		emit("update:selectedTaskIds", new Set());
+		taskStore.clearSelection();
 	} catch (err) {
 		console.error("Failed to delete selected tasks:", err);
 	} finally {
@@ -290,14 +286,14 @@ async function handleBatchDelete() {
 
 			<!-- Selected count label -->
 			<span
-				v-if="selectedTaskIds.size > 0"
+				v-if="taskStore.selectedTaskIds.size > 0"
 				class="text-zinc-500 dark:text-zinc-400 font-medium px-1"
 			>
-				{{ selectedTaskIds.size }} selected
+				{{ taskStore.selectedTaskIds.size }} selected
 			</span>
 
 			<!-- Action buttons (active only when >= 1 task selected) -->
-			<template v-if="selectedTaskIds.size > 0">
+			<template v-if="taskStore.selectedTaskIds.size > 0">
 				<!-- Mark Completed (✓) -->
 				<button
 					type="button"
@@ -505,7 +501,9 @@ async function handleBatchDelete() {
 								:key="tag.id"
 								class="flex items-center justify-between gap-1 px-1.5 py-0.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800"
 							>
-								<span class="truncate text-zinc-700 dark:text-zinc-300">#{{ tag.name }}</span>
+								<span class="truncate text-zinc-700 dark:text-zinc-300">
+									{{ formatTagLabel(tag.name) }}
+								</span>
 								<div class="flex items-center gap-1 shrink-0">
 									<button
 										type="button"

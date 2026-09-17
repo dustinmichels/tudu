@@ -7,10 +7,19 @@ import {
 	getLists as apiGetLists,
 	updateList as apiUpdateList,
 } from "../services/api.ts";
+import {
+	isGtdListName,
+	isNextActionsListName,
+	isSomedayMaybeListName,
+	isWaitingOnListName,
+} from "../services/queryEngine.ts";
 import { useTaskStore } from "./tasks.ts";
 
 export type DefaultView =
 	| "inbox"
+	| "next_actions"
+	| "waiting_on"
+	| "someday_maybe"
 	| "today"
 	| "tomorrow"
 	| "this_week"
@@ -37,8 +46,20 @@ export const useListStore = defineStore("lists", () => {
 		() => lists.value.find((l) => l.name.toLowerCase() === "inbox") ?? null,
 	);
 
+	const nextActionsList = computed<List | null>(
+		() => lists.value.find((l) => isNextActionsListName(l.name)) ?? null,
+	);
+
+	const waitingOnList = computed<List | null>(
+		() => lists.value.find((l) => isWaitingOnListName(l.name)) ?? null,
+	);
+
+	const somedayMaybeList = computed<List | null>(
+		() => lists.value.find((l) => isSomedayMaybeListName(l.name)) ?? null,
+	);
+
 	const customLists = computed<List[]>(() =>
-		sortedLists.value.filter((l) => l.name.toLowerCase() !== "inbox"),
+		sortedLists.value.filter((l) => l.name.toLowerCase() !== "inbox" && !isGtdListName(l.name)),
 	);
 
 	function setActiveList(id: string | null) {
@@ -148,6 +169,12 @@ export const useListStore = defineStore("lists", () => {
 				const taskStore = useTaskStore();
 				taskStore.allTasks = taskStore.allTasks.filter((t) => t.list_id !== id);
 				taskStore.tasks = taskStore.tasks.filter((t) => t.list_id !== id);
+				if (taskStore.selectedTaskIds.size > 0) {
+					const remainingIds = new Set(taskStore.allTasks.map((t) => t.id));
+					taskStore.selectedTaskIds = new Set(
+						[...taskStore.selectedTaskIds].filter((tid) => remainingIds.has(tid)),
+					);
+				}
 				await taskStore.fetchAllTasks();
 			} catch {
 				// Handle test or non-store environments gracefully
@@ -170,6 +197,9 @@ export const useListStore = defineStore("lists", () => {
 		activeList,
 		sortedLists,
 		inboxList,
+		nextActionsList,
+		waitingOnList,
+		somedayMaybeList,
 		customLists,
 		setActiveList,
 		setActiveView,

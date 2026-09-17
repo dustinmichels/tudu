@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {
+	AtSign,
 	Calendar,
 	CornerDownLeft,
 	Flag,
@@ -226,6 +227,7 @@ function handleBackdropClick(e: MouseEvent) {
 									class="px-2 py-1 text-[11px] font-semibold text-zinc-400 uppercase tracking-wider flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800"
 								>
 									<span v-if="activeSmartToken?.prefix === '#'">Tags & Lists (#)</span>
+									<span v-else-if="activeSmartToken?.prefix === '@'">Contexts (@)</span>
 									<span v-else-if="activeSmartToken?.prefix === '^'">Due Dates (^)</span>
 									<span v-else-if="activeSmartToken?.prefix === '!'">Priority (!)</span>
 									<span class="text-[10px] font-normal normal-case text-zinc-400"
@@ -246,8 +248,12 @@ function handleBackdropClick(e: MouseEvent) {
 										]"
 									>
 										<div class="flex items-center gap-2 min-w-0">
+											<AtSign
+												v-if="item.type === 'context'"
+												class="w-3.5 h-3.5 text-amber-500 shrink-0"
+											/>
 											<TagIcon
-												v-if="item.type === 'tag'"
+												v-else-if="item.type === 'tag'"
 												class="w-3.5 h-3.5 text-purple-500 shrink-0"
 											/>
 											<FolderInput
@@ -285,6 +291,14 @@ function handleBackdropClick(e: MouseEvent) {
 								<span class="text-[10px] uppercase font-semibold tracking-wider text-zinc-400/70"
 									>Smart add:</span
 								>
+								<button
+									type="button"
+									@click="appendSmartPrefix('@')"
+									class="font-mono hover:text-amber-600 dark:hover:text-amber-400 cursor-pointer"
+								>
+									<span class="font-bold">@</span>context
+								</button>
+								<span>·</span>
 								<button
 									type="button"
 									@click="appendSmartPrefix('#')"

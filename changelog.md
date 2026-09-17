@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-17
+
+### Added
+
+- **Undo (⌘Z)**: Task mutations now record inverse operations in `useUndoStore`, surfaced by the floating undo toast and `⌘Z`/`Ctrl+Z`. Covers add, complete/reopen, discrete field edits (priority, due, list, rename), delete, batch delete, and batch update; per-keystroke text edits keep native input undo.
+- **Task Restore**: Registered the existing `restore_task`/`batch_restore_tasks` backend commands in the Tauri invoke handler and exposed `taskStore.restoreTask`/`batchRestore`, so soft-deleted tasks (and the descendants deleted with them) can be revived.
+
 ## 2026-09-13
 
 ### Added

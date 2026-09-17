@@ -36,6 +36,7 @@ import {
 	selectFreeformTasks,
 	type Point,
 } from "../utils/freeform.ts";
+import { formatTagLabel } from "../utils/smartAdd.ts";
 
 const CARD_WIDTH = DEFAULT_CARD_WIDTH;
 const CARD_HEIGHT = DEFAULT_CARD_HEIGHT;
@@ -70,14 +71,17 @@ const hasActiveSelection = computed(
 );
 
 const headerTitle = computed(() => {
-	if (filterStore.selectedTag) return `#${filterStore.selectedTag}`;
+	if (filterStore.selectedTag) return formatTagLabel(filterStore.selectedTag);
 	if (listStore.activeList) return listStore.activeList.name;
 	const titles: Record<string, string> = {
 		inbox: "Inbox",
 		all: "All Tasks",
+		next_actions: "Next actions",
+		waiting_on: "Waiting on",
+		someday_maybe: "Someday/Maybe",
 		today: "Today",
 		tomorrow: "Tomorrow",
-		this_week: "This Week",
+		this_week: "Next Week",
 		overdue: "Overdue",
 		trash: "Trash",
 	};
@@ -758,7 +762,7 @@ function noteClass(task: Task): string {
 								class="flex items-center gap-0.5 truncate"
 							>
 								<TagIcon :class="isFreeformSubtask(task) ? 'h-2.5 w-2.5' : 'h-3 w-3'" />{{
-									tag.name
+									formatTagLabel(tag.name)
 								}}
 							</span>
 						</div>

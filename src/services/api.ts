@@ -150,6 +150,14 @@ export async function batchDeleteTasks(ids: string[]): Promise<void> {
 	return safeInvoke<void>("batch_delete_tasks", { ids });
 }
 
+export async function restoreTask(id: string): Promise<Task> {
+	return safeInvoke<Task>("restore_task", { id });
+}
+
+export async function batchRestoreTasks(ids: string[]): Promise<Task[]> {
+	return safeInvoke<Task[]>("batch_restore_tasks", { ids });
+}
+
 // ---------------------------------------------------------------------------
 // Tags & Notes API
 // ---------------------------------------------------------------------------

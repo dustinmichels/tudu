@@ -3,6 +3,7 @@ import { onMounted, onUnmounted, watch } from "vue";
 import CalendarView from "../components/CalendarView.vue";
 import FreeformView from "../components/FreeformView.vue";
 import BunnyCelebration from "../components/BunnyCelebration.vue";
+import FloatingUndoButton from "../components/FloatingUndoButton.vue";
 import CaptureModal from "../components/CaptureModal.vue";
 import CommandPaletteModal from "../components/CommandPaletteModal.vue";
 import GlobalHeader from "../components/GlobalHeader.vue";
@@ -50,6 +51,7 @@ watch(
 	[() => listStore.activeListId, () => listStore.activeView, () => filterStore.selectedTag],
 	async ([listId, view, tag]) => {
 		taskStore.setActiveTask(null);
+		taskStore.clearSelection();
 		if (tag) {
 			try {
 				await taskStore.fetchTasks(null, undefined, null, tag);
@@ -134,5 +136,6 @@ watch(
 		<CaptureModal />
 		<CommandPaletteModal />
 		<BunnyCelebration />
+		<FloatingUndoButton />
 	</div>
 </template>

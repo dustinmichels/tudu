@@ -52,57 +52,111 @@ const openLeft = computed(() => {
 	if (typeof window === "undefined") return false;
 	return props.x + 200 + 180 > window.innerWidth;
 });
+const isMultiSelected = computed(() => {
+	return Boolean(
+		props.taskId &&
+		taskStore.selectedTaskIds.has(props.taskId) &&
+		taskStore.selectedTaskIds.size > 1,
+	);
+});
+
+const targetIds = computed<string[]>(() => {
+	if (isMultiSelected.value) {
+		return Array.from(taskStore.selectedTaskIds);
+	}
+	return props.taskId ? [props.taskId] : [];
+});
 
 async function handleToggleComplete() {
-	if (!props.taskId) return;
-	const id = props.taskId;
+	const multi = isMultiSelected.value;
+	const ids = targetIds.value;
+	if (!ids.length) return;
 	emit("close");
 	try {
-		await taskStore.toggleTask(id);
+		if (multi) {
+			await taskStore.batchUpdate({
+				task_ids: ids,
+				completed: true,
+			});
+			taskStore.clearSelection();
+		} else {
+			await taskStore.toggleTask(ids[0]!);
+		}
 	} catch (err) {
 		console.error("Failed to toggle task from context menu:", err);
 	}
 }
 
 async function handleSetPriority(priority: Priority | null) {
-	if (!props.taskId) return;
-	const id = props.taskId;
+	const multi = isMultiSelected.value;
+	const ids = targetIds.value;
+	if (!ids.length) return;
 	emit("close");
 	try {
-		await taskStore.updateTask({ id, priority });
+		if (multi) {
+			await taskStore.batchUpdate({
+				task_ids: ids,
+				priority,
+			});
+		} else {
+			await taskStore.updateTask({ id: ids[0]!, priority });
+		}
 	} catch (err) {
 		console.error("Failed to update priority from context menu:", err);
 	}
 }
 
 async function handleMoveToList(listId: string) {
-	if (!props.taskId) return;
-	const id = props.taskId;
+	const multi = isMultiSelected.value;
+	const ids = targetIds.value;
+	if (!ids.length) return;
 	emit("close");
 	try {
-		await taskStore.updateTask({ id, list_id: listId });
+		if (multi) {
+			await taskStore.batchUpdate({
+				task_ids: ids,
+				list_id: listId,
+			});
+			taskStore.clearSelection();
+		} else {
+			await taskStore.updateTask({ id: ids[0]!, list_id: listId });
+		}
 	} catch (err) {
 		console.error("Failed to move task to list from context menu:", err);
 	}
 }
 
 async function handleContextMenuPostpone(days: number) {
-	if (!props.taskId) return;
-	const id = props.taskId;
+	const multi = isMultiSelected.value;
+	const ids = targetIds.value;
+	if (!ids.length) return;
 	emit("close");
 	try {
-		await taskStore.postponeTask(id, days);
+		if (multi) {
+			await taskStore.batchUpdate({
+				task_ids: ids,
+				postpone_days: days,
+			});
+		} else {
+			await taskStore.postponeTask(ids[0]!, days);
+		}
 	} catch (err) {
 		console.error("Failed to postpone task from context menu:", err);
 	}
 }
 
 async function handleDelete() {
-	if (!props.taskId) return;
-	const id = props.taskId;
+	const multi = isMultiSelected.value;
+	const ids = targetIds.value;
+	if (!ids.length) return;
 	emit("close");
 	try {
-		await taskStore.deleteTask(id);
+		if (multi) {
+			await taskStore.batchDelete(ids);
+			taskStore.clearSelection();
+		} else {
+			await taskStore.deleteTask(ids[0]!);
+		}
 	} catch (err) {
 		console.error("Failed to delete task from context menu:", err);
 	}
@@ -130,7 +184,13 @@ async function handleDelete() {
 				class="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-500"
 			/>
 			<Circle v-else class="w-3.5 h-3.5 text-zinc-400" />
-			<span>{{ currentTask?.completed ? "Mark Incomplete" : "Mark Complete" }}</span>
+			<span>{{
+				isMultiSelected
+					? `Mark (${targetIds.length}) Complete`
+					: currentTask?.completed
+						? "Mark Incomplete"
+						: "Mark Complete"
+			}}</span>
 		</button>
 
 		<div class="my-1 border-t border-zinc-100 dark:border-zinc-800" />
@@ -314,7 +374,7 @@ async function handleDelete() {
 			class="w-full flex items-center gap-2 px-3 py-1.5 text-left text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors cursor-pointer"
 		>
 			<Trash2 class="w-3.5 h-3.5 text-red-500" />
-			<span>Delete Task</span>
+			<span>{{ isMultiSelected ? `Delete (${targetIds.length}) Tasks` : "Delete Task" }}</span>
 		</button>
 	</div>
 </template>

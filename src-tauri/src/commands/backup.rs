@@ -901,7 +901,7 @@ mod tests {
             let exported = export_backup_impl(&conn).await.expect("export backup");
             assert_eq!(exported.version, "1.0");
             assert_eq!(exported.source, Some("tudu".to_string()));
-            assert_eq!(exported.lists.len(), 2);
+            assert_eq!(exported.lists.len(), 5);
             assert!(exported.lists.iter().any(|l| l.name == "Inbox"));
             assert!(exported.lists.iter().any(|l| l.name == "Sprint Tasks"));
             assert_eq!(exported.tasks.len(), 1);

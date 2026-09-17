@@ -7,9 +7,16 @@ run = "./scripts/reset-db.sh $@"
 alias = ["reset-db", "db-reset"]
 
 [tasks.install]
-description = "Build app and install to /Applications"
+description = "Build app and open DMG for installation"
+alias = ["dmg", "open-dmg"]
 run = """
+set -e
 bun run tauri build
-cp -r src-tauri/target/release/bundle/macos/TuDu.app /Applications/TuDu.app
-echo "Installed to /Applications/TuDu.app"
+LATEST_DMG=$(ls -t src-tauri/target/release/bundle/dmg/*.dmg 2>/dev/null | head -n 1)
+if [ -n "$LATEST_DMG" ]; then
+  open "$LATEST_DMG"
+else
+  echo "No DMG found in src-tauri/target/release/bundle/dmg/" >&2
+  exit 1
+fi
 """

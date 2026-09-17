@@ -20,6 +20,29 @@ mock.module("@tauri-apps/api/core", () => ({
 				deleted_at: null,
 			};
 		}
+		if (command === "batch_update_tasks") {
+			const { input } =
+				(args as {
+					input: {
+						task_ids: string[];
+						priority?: string | null;
+						completed?: boolean;
+						postpone_days?: number;
+					};
+				}) || {};
+			return (input?.task_ids ?? []).map((id) => ({
+				id,
+				title: `Task ${id}`,
+				completed: Boolean(input?.completed),
+				priority: input?.priority ?? null,
+				created_at: new Date().toISOString(),
+				updated_at: new Date().toISOString(),
+				deleted_at: null,
+			}));
+		}
+		if (command === "batch_delete_tasks" || command === "delete_task") {
+			return null;
+		}
 		return null;
 	},
 }));
@@ -559,6 +582,9 @@ describe("Keyboard Shortcuts & Navigation", () => {
 		// Cycle forward through all views and custom lists
 		const expectedOrder = [
 			{ view: "all", list: null },
+			{ view: "next_actions", list: null },
+			{ view: "waiting_on", list: null },
+			{ view: "someday_maybe", list: null },
 			{ view: "today", list: null },
 			{ view: "tomorrow", list: null },
 			{ view: "this_week", list: null },
@@ -954,5 +980,202 @@ describe("Keyboard Shortcuts & Navigation", () => {
 
 		expect(handleGlobalShortcut(createKeyEvent("k"), stores, options)).toBe(true);
 		expect(taskStore.activeTaskId).toBe("custom-2");
+	});
+
+	it("handleEscape: clears multi-selection before closing active task detail", () => {
+		const { handleEscape } = require("../src/composables/useKeyboardShortcuts.ts");
+		const taskStore = useTaskStore();
+		const uiStore = useUIStore();
+
+		taskStore.setActiveTask("task-1");
+		uiStore.toggleDetail(true);
+		taskStore.setSelectedTaskIds(["task-1", "task-2"]);
+
+		// First Escape clears multi-selection
+		expect(handleEscape(uiStore, taskStore)).toBe(true);
+		expect(taskStore.selectedTaskIds.size).toBe(0);
+		expect(taskStore.activeTaskId).toBe("task-1");
+		expect(uiStore.isDetailOpen).toBe(true);
+
+		// Second Escape deselects active task and closes detail pane
+		expect(handleEscape(uiStore, taskStore)).toBe(true);
+		expect(taskStore.activeTaskId).toBeNull();
+		expect(uiStore.isDetailOpen).toBe(false);
+	});
+
+	it("handleGlobalShortcut: Cmd+A selects all visible tasks", () => {
+		const { handleGlobalShortcut } = require("../src/composables/useKeyboardShortcuts.ts");
+		const filterStore = useFilterStore();
+		const listStore = useListStore();
+		const taskStore = useTaskStore();
+		const uiStore = useUIStore();
+		const stores = { filterStore, listStore, taskStore, uiStore };
+
+		taskStore.tasks = [
+			{ id: "t1", title: "Task 1", parent_id: null } as unknown as Task,
+			{ id: "t2", title: "Task 2", parent_id: null } as unknown as Task,
+			{ id: "t3", title: "Task 3", parent_id: null } as unknown as Task,
+		];
+
+		const cmdAEvent = {
+			key: "a",
+			metaKey: true,
+			ctrlKey: false,
+			shiftKey: false,
+			altKey: false,
+			repeat: false,
+			target: null,
+			preventDefault: () => {},
+			defaultPrevented: false,
+		} as unknown as KeyboardEvent;
+
+		expect(handleGlobalShortcut(cmdAEvent, stores)).toBe(true);
+		expect(taskStore.selectedTaskIds.size).toBe(3);
+		expect(taskStore.selectedTaskIds.has("t1")).toBe(true);
+		expect(taskStore.selectedTaskIds.has("t2")).toBe(true);
+		expect(taskStore.selectedTaskIds.has("t3")).toBe(true);
+	});
+
+	it("handleGlobalShortcut: deletes multiple selected tasks when pressing Delete, Backspace, or d", async () => {
+		const { handleGlobalShortcut } = require("../src/composables/useKeyboardShortcuts.ts");
+		const filterStore = useFilterStore();
+		const listStore = useListStore();
+		const taskStore = useTaskStore();
+		const uiStore = useUIStore();
+		const stores = { filterStore, listStore, taskStore, uiStore };
+
+		taskStore.tasks = [
+			{ id: "t1", title: "Task 1", parent_id: null } as unknown as Task,
+			{ id: "t2", title: "Task 2", parent_id: null } as unknown as Task,
+			{ id: "t3", title: "Task 3", parent_id: null } as unknown as Task,
+		];
+		taskStore.allTasks = [...taskStore.tasks];
+		taskStore.setSelectedTaskIds(["t1", "t2"]);
+
+		let deletePrevented = false;
+		const deleteEvent = {
+			key: "Delete",
+			metaKey: false,
+			ctrlKey: false,
+			shiftKey: false,
+			altKey: false,
+			repeat: false,
+			target: null,
+			preventDefault: () => {
+				deletePrevented = true;
+			},
+			get defaultPrevented() {
+				return deletePrevented;
+			},
+		} as unknown as KeyboardEvent;
+
+		const origDelete = taskStore.batchDelete;
+		let pendingDelete: Promise<void> | undefined;
+		taskStore.batchDelete = (ids) => {
+			const p = origDelete(ids);
+			pendingDelete = p;
+			return p;
+		};
+
+		expect(handleGlobalShortcut(deleteEvent, stores)).toBe(true);
+		expect(deletePrevented).toBe(true);
+		await pendingDelete;
+
+		expect(taskStore.tasks.map((t) => t.id)).toEqual(["t3"]);
+		expect(taskStore.selectedTaskIds.size).toBe(0);
+	});
+
+	it("handleGlobalShortcut: completes multiple selected tasks when pressing c", async () => {
+		const { handleGlobalShortcut } = require("../src/composables/useKeyboardShortcuts.ts");
+		const filterStore = useFilterStore();
+		const listStore = useListStore();
+		const taskStore = useTaskStore();
+		const uiStore = useUIStore();
+		const stores = { filterStore, listStore, taskStore, uiStore };
+
+		taskStore.tasks = [
+			{ id: "t1", title: "Task 1", completed: false, parent_id: null } as unknown as Task,
+			{ id: "t2", title: "Task 2", completed: false, parent_id: null } as unknown as Task,
+		];
+		taskStore.allTasks = [...taskStore.tasks];
+		taskStore.setSelectedTaskIds(["t1", "t2"]);
+
+		const cEvent = {
+			key: "c",
+			metaKey: false,
+			ctrlKey: false,
+			shiftKey: false,
+			altKey: false,
+			repeat: false,
+			target: null,
+			preventDefault: () => {},
+			defaultPrevented: false,
+		} as unknown as KeyboardEvent;
+
+		const origUpdate = taskStore.batchUpdate;
+		let pendingUpdate: Promise<Task[]> | undefined;
+		taskStore.batchUpdate = (opts) => {
+			const p = origUpdate(opts);
+			pendingUpdate = p;
+			return p;
+		};
+
+		expect(handleGlobalShortcut(cEvent, stores)).toBe(true);
+		await pendingUpdate;
+		expect(taskStore.selectedTaskIds.size).toBe(0);
+	});
+
+	it("handleGlobalShortcut: batch updates priority with 1, 2, 3, 4 when multiple tasks are selected", async () => {
+		const { handleGlobalShortcut } = require("../src/composables/useKeyboardShortcuts.ts");
+		const filterStore = useFilterStore();
+		const listStore = useListStore();
+		const taskStore = useTaskStore();
+		const uiStore = useUIStore();
+		const stores = { filterStore, listStore, taskStore, uiStore };
+
+		taskStore.tasks = [
+			{ id: "t1", title: "Task 1", priority: null, parent_id: null } as unknown as Task,
+			{ id: "t2", title: "Task 2", priority: null, parent_id: null } as unknown as Task,
+		];
+		taskStore.allTasks = [...taskStore.tasks];
+
+		const priorityCases = [
+			{ key: "1", expected: 1 },
+			{ key: "2", expected: 2 },
+			{ key: "3", expected: 3 },
+			{ key: "4", expected: null },
+		];
+
+		for (const { key, expected } of priorityCases) {
+			taskStore.setSelectedTaskIds(["t1", "t2"]);
+
+			let capturedOpts: { task_ids: string[]; priority?: unknown } | undefined;
+			const origUpdate = taskStore.batchUpdate;
+			let pendingUpdate: Promise<Task[]> | undefined;
+			taskStore.batchUpdate = (opts) => {
+				capturedOpts = opts;
+				pendingUpdate = origUpdate(opts);
+				return pendingUpdate;
+			};
+
+			const keyEvent = {
+				key,
+				metaKey: false,
+				ctrlKey: false,
+				shiftKey: false,
+				altKey: false,
+				repeat: false,
+				target: null,
+				preventDefault: () => {},
+				defaultPrevented: false,
+			} as unknown as KeyboardEvent;
+
+			expect(handleGlobalShortcut(keyEvent, stores)).toBe(true);
+			await pendingUpdate;
+
+			expect(capturedOpts).toBeDefined();
+			expect(capturedOpts?.task_ids).toEqual(["t1", "t2"]);
+			expect(capturedOpts?.priority).toBe(expected);
+		}
 	});
 });

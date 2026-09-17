@@ -3,17 +3,21 @@ import {
 	AlertCircle,
 	ArrowDown,
 	ArrowUp,
+	AtSign,
 	Calendar,
 	CalendarRange,
 	Check,
 	CheckSquare,
+	Clock,
 	Inbox,
+	Lightbulb,
 	ListTree,
 	Menu,
 	PanelRightClose,
 	Sunrise,
 	Tag as TagIcon,
 	Trash2,
+	Zap,
 } from "lucide-vue-next";
 import { computed, onUnmounted, ref } from "vue";
 import type { Task } from "../../models/index.ts";
@@ -23,7 +27,8 @@ import { useTaskStore } from "../../stores/tasks.ts";
 import { useUIStore } from "../../stores/ui.ts";
 import { DEFAULT_LIST_ICON, getListIcon } from "../../utils/icons.ts";
 import { copyToClipboard, formatTasksAsMarkdown } from "../../utils/markdown.ts";
-import type { SortOrder } from "../../utils/sorting.ts";
+import { getNextSortState, type SortOrder } from "../../utils/sorting.ts";
+import { formatTagLabel } from "../../utils/smartAdd.ts";
 import IconPickerPopover from "../IconPickerPopover.vue";
 
 export type SortFieldOption = "created_at" | "priority" | "due" | "list" | "tags";
@@ -39,10 +44,6 @@ const props = withDefaults(
 		activeSortOrder: "asc",
 	},
 );
-
-const emit = defineEmits<{
-	(e: "changeSort", field: SortFieldOption): void;
-}>();
 
 const listStore = useListStore();
 const taskStore = useTaskStore();
@@ -60,25 +61,20 @@ const currentSortField = computed(
 const currentSortOrder = computed(() => props.activeSortOrder ?? filterStore.sortOrder);
 
 function handleSortClick(field: SortFieldOption) {
-	if (filterStore.sortBy === field) {
-		if (filterStore.sortOrder === "asc") {
-			filterStore.setSorting(field, "desc");
-		} else {
-			filterStore.setSorting("priority", "asc");
-		}
-	} else {
-		filterStore.setSorting(field, "asc");
-	}
-	emit("changeSort", field);
+	const next = getNextSortState(filterStore.sortBy, filterStore.sortOrder, field);
+	filterStore.setSorting(next.field, next.order);
 }
 
 const viewTitle = computed(() => {
-	if (filterStore.selectedTag) return `#${filterStore.selectedTag}`;
+	if (filterStore.selectedTag) return formatTagLabel(filterStore.selectedTag);
 	if (listStore.activeView === "inbox") return "Inbox";
 	if (listStore.activeView === "all") return "All Tasks";
+	if (listStore.activeView === "next_actions") return "Next actions";
+	if (listStore.activeView === "waiting_on") return "Waiting on";
+	if (listStore.activeView === "someday_maybe") return "Someday/Maybe";
 	if (listStore.activeView === "today") return "Today";
 	if (listStore.activeView === "tomorrow") return "Tomorrow";
-	if (listStore.activeView === "this_week") return "This Week";
+	if (listStore.activeView === "this_week") return "Next Week";
 	if (listStore.activeView === "overdue") return "Overdue";
 	if (listStore.activeView === "trash") return "Trash";
 	return null;
@@ -153,7 +149,11 @@ onUnmounted(() => {
 			<div class="min-w-0">
 				<h2 class="text-lg sm:text-xl font-bold truncate flex items-center gap-2">
 					<!-- Tag Icon or View or List Icon -->
-					<TagIcon v-if="filterStore.selectedTag" class="w-5 h-5 text-emerald-500 shrink-0" />
+					<AtSign
+						v-if="filterStore.selectedTag && filterStore.selectedTag.startsWith('@')"
+						class="w-5 h-5 text-amber-500 shrink-0"
+					/>
+					<TagIcon v-else-if="filterStore.selectedTag" class="w-5 h-5 text-emerald-500 shrink-0" />
 					<Inbox
 						v-else-if="
 							(activeList && activeList.name.toLowerCase() === 'inbox') ||
@@ -164,6 +164,18 @@ onUnmounted(() => {
 					<CheckSquare
 						v-else-if="listStore.activeView === 'all'"
 						class="w-5 h-5 text-indigo-500 shrink-0"
+					/>
+					<Zap
+						v-else-if="listStore.activeView === 'next_actions'"
+						class="w-5 h-5 text-amber-500 shrink-0"
+					/>
+					<Clock
+						v-else-if="listStore.activeView === 'waiting_on'"
+						class="w-5 h-5 text-orange-500 shrink-0"
+					/>
+					<Lightbulb
+						v-else-if="listStore.activeView === 'someday_maybe'"
+						class="w-5 h-5 text-yellow-500 shrink-0"
 					/>
 					<Calendar
 						v-else-if="listStore.activeView === 'today'"

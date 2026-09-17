@@ -13,6 +13,27 @@ export interface SortOptions {
 }
 
 /**
+ * Compute the next sort state following the 3-state cycle:
+ * - Unselected field (or when currently on default priority) sets (field, 'asc')
+ * - Active field when 'asc' sets (field, 'desc')
+ * - Active field when 'desc' resets to ('priority', 'asc')
+ * - Active 'priority' toggles between 'asc' and 'desc'
+ */
+export function getNextSortState(
+	currentField: SortField,
+	currentOrder: SortOrder,
+	targetField: SortField,
+): { field: SortField; order: SortOrder } {
+	if (currentField === targetField) {
+		if (currentOrder === "asc") {
+			return { field: targetField, order: "desc" };
+		}
+		return { field: "priority", order: "asc" };
+	}
+	return { field: targetField, order: "asc" };
+}
+
+/**
  * Compare two tasks by completion status (incomplete tasks before completed tasks).
  */
 export function compareByCompletion(a: Task, b: Task): number {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
 	AlertCircle,
+	AtSign,
 	Bike,
 	Calendar,
 	CalendarRange,
@@ -8,8 +9,10 @@ import {
 	CheckSquare,
 	ChevronDown,
 	ChevronRight,
+	Clock,
 	Edit2,
 	Inbox,
+	Lightbulb,
 	Plus,
 	Sunrise,
 	Tag as TagIcon,
@@ -24,6 +27,7 @@ import { useTagStore } from "../stores/tags.ts";
 import { useTaskStore } from "../stores/tasks.ts";
 import { useUIStore } from "../stores/ui.ts";
 import { DEFAULT_LIST_ICON, getListIcon } from "../utils/icons.ts";
+import { formatTagLabel } from "../utils/smartAdd.ts";
 import IconPickerPopover from "./IconPickerPopover.vue";
 
 const listStore = useListStore();
@@ -53,52 +57,89 @@ const isSmartViewsCollapsed = ref(false);
 const isListsCollapsed = ref(false);
 const isTagsCollapsed = ref(false);
 
-// Smart Views items configuration
-const smartViews = computed(() => [
+interface SmartViewItem {
+	id: DefaultView;
+	name: string;
+	icon: any;
+	iconColor: string;
+	count: number;
+}
+
+const primaryViews = computed<SmartViewItem[]>(() => [
 	{
-		id: "inbox" as DefaultView,
+		id: "inbox",
 		name: "Inbox",
 		icon: Inbox,
 		iconColor: "text-blue-500",
 		count: taskStore.countInbox,
 	},
 	{
-		id: "all" as DefaultView,
+		id: "all",
 		name: "All Tasks",
 		icon: CheckSquare,
 		iconColor: "text-indigo-500",
 		count: taskStore.countAll,
 	},
+]);
+
+const gtdViews = computed<SmartViewItem[]>(() => [
 	{
-		id: "today" as DefaultView,
+		id: "next_actions",
+		name: "Next actions",
+		icon: Zap,
+		iconColor: "text-amber-500",
+		count: taskStore.countNextActions,
+	},
+	{
+		id: "waiting_on",
+		name: "Waiting on",
+		icon: Clock,
+		iconColor: "text-orange-500",
+		count: taskStore.countWaitingOn,
+	},
+	{
+		id: "someday_maybe",
+		name: "Someday/Maybe",
+		icon: Lightbulb,
+		iconColor: "text-yellow-500",
+		count: taskStore.countSomedayMaybe,
+	},
+]);
+
+const deadlineViews = computed<SmartViewItem[]>(() => [
+	{
+		id: "today",
 		name: "Today",
 		icon: Calendar,
 		iconColor: "text-emerald-500",
 		count: taskStore.countToday,
 	},
 	{
-		id: "tomorrow" as DefaultView,
+		id: "tomorrow",
 		name: "Tomorrow",
 		icon: Sunrise,
 		iconColor: "text-amber-500",
 		count: taskStore.countTomorrow,
 	},
 	{
-		id: "this_week" as DefaultView,
-		name: "This Week",
+		id: "this_week",
+		name: "Next Week",
 		icon: CalendarRange,
 		iconColor: "text-purple-500",
 		count: taskStore.countThisWeek,
 	},
 	{
-		id: "overdue" as DefaultView,
+		id: "overdue",
 		name: "Overdue",
 		icon: AlertCircle,
 		iconColor: "text-red-500",
 		count: taskStore.countOverdue,
 	},
+]);
+
+const otherViews = computed<SmartViewItem[]>(() => [
 	{
-		id: "trash" as DefaultView,
+		id: "trash",
 		name: "Trash",
 		icon: Trash2,
 		iconColor: "text-rose-500",
@@ -273,40 +314,162 @@ async function handleDeleteList(event: MouseEvent, id: string) {
 					<component :is="isSmartViewsCollapsed ? ChevronRight : ChevronDown" class="w-3.5 h-3.5" />
 				</button>
 
-				<div v-show="!isSmartViewsCollapsed" class="mt-1 space-y-0.5">
-					<button
-						v-for="view in smartViews"
-						:key="view.id"
-						type="button"
-						@click="handleSelectSmartView(view.id)"
-						:title="view.name"
-						class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer text-left"
-						:class="[
-							listStore.activeView === view.id && !filterStore.selectedTag
-								? 'bg-emerald-100/70 text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200'
-								: 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900',
-						]"
-					>
-						<div class="flex items-center gap-2.5 min-w-0">
-							<component :is="view.icon" class="w-4 h-4 shrink-0" :class="view.iconColor" />
-							<span class="truncate">{{ view.name }}</span>
-						</div>
+				<div v-show="!isSmartViewsCollapsed" class="mt-1 space-y-1">
+					<!-- Primary Views: Inbox, All Tasks -->
+					<div class="space-y-0.5">
+						<button
+							v-for="view in primaryViews"
+							:key="view.id"
+							type="button"
+							@click="handleSelectSmartView(view.id)"
+							:title="view.name"
+							class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer text-left"
+							:class="[
+								listStore.activeView === view.id && !filterStore.selectedTag
+									? 'bg-emerald-100/70 text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200'
+									: 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900',
+							]"
+						>
+							<div class="flex items-center gap-2.5 min-w-0">
+								<component :is="view.icon" class="w-4 h-4 shrink-0" :class="view.iconColor" />
+								<span class="truncate">{{ view.name }}</span>
+							</div>
 
-						<div class="flex items-center gap-1.5 shrink-0">
-							<!-- Incomplete task badge -->
-							<span
-								v-if="view.count > 0"
-								class="text-xs font-semibold px-1.5 py-0.2 rounded-full"
+							<div class="flex items-center gap-1.5 shrink-0">
+								<span
+									v-if="view.count > 0"
+									class="text-xs font-semibold px-1.5 py-0.2 rounded-full"
+									:class="[
+										listStore.activeView === view.id && !filterStore.selectedTag
+											? 'bg-emerald-200 text-emerald-900 dark:bg-emerald-900 dark:text-emerald-100'
+											: 'bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400',
+									]"
+								>
+									{{ view.count }}
+								</span>
+							</div>
+						</button>
+					</div>
+
+					<!-- GTD Views Group (Bracketed) -->
+					<div class="relative pl-2.5 my-1" role="group" aria-label="GTD lists">
+						<div
+							class="absolute left-1 top-4 bottom-4 w-1.5 border-l-2 border-t-2 border-b-2 rounded-l-xs border-zinc-300 dark:border-zinc-700 pointer-events-none"
+							aria-hidden="true"
+						/>
+						<div class="space-y-0.5">
+							<button
+								v-for="view in gtdViews"
+								:key="view.id"
+								type="button"
+								@click="handleSelectSmartView(view.id)"
+								:title="view.name"
+								class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer text-left"
 								:class="[
 									listStore.activeView === view.id && !filterStore.selectedTag
-										? 'bg-emerald-200 text-emerald-900 dark:bg-emerald-900 dark:text-emerald-100'
-										: 'bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400',
+										? 'bg-emerald-100/70 text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200'
+										: 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900',
 								]"
 							>
-								{{ view.count }}
-							</span>
+								<div class="flex items-center gap-2.5 min-w-0">
+									<component :is="view.icon" class="w-4 h-4 shrink-0" :class="view.iconColor" />
+									<span class="truncate">{{ view.name }}</span>
+								</div>
+
+								<div class="flex items-center gap-1.5 shrink-0">
+									<span
+										v-if="view.count > 0"
+										class="text-xs font-semibold px-1.5 py-0.2 rounded-full"
+										:class="[
+											listStore.activeView === view.id && !filterStore.selectedTag
+												? 'bg-emerald-200 text-emerald-900 dark:bg-emerald-900 dark:text-emerald-100'
+												: 'bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400',
+										]"
+									>
+										{{ view.count }}
+									</span>
+								</div>
+							</button>
 						</div>
-					</button>
+					</div>
+
+					<!-- Deadline Views Group (Bracketed) -->
+					<div class="relative pl-2.5 my-1" role="group" aria-label="Deadline views">
+						<div
+							class="absolute left-1 top-4 bottom-4 w-1.5 border-l-2 border-t-2 border-b-2 rounded-l-xs border-zinc-300 dark:border-zinc-700 pointer-events-none"
+							aria-hidden="true"
+						/>
+						<div class="space-y-0.5">
+							<button
+								v-for="view in deadlineViews"
+								:key="view.id"
+								type="button"
+								@click="handleSelectSmartView(view.id)"
+								:title="view.name"
+								class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer text-left"
+								:class="[
+									listStore.activeView === view.id && !filterStore.selectedTag
+										? 'bg-emerald-100/70 text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200'
+										: 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900',
+								]"
+							>
+								<div class="flex items-center gap-2.5 min-w-0">
+									<component :is="view.icon" class="w-4 h-4 shrink-0" :class="view.iconColor" />
+									<span class="truncate">{{ view.name }}</span>
+								</div>
+
+								<div class="flex items-center gap-1.5 shrink-0">
+									<span
+										v-if="view.count > 0"
+										class="text-xs font-semibold px-1.5 py-0.2 rounded-full"
+										:class="[
+											listStore.activeView === view.id && !filterStore.selectedTag
+												? 'bg-emerald-200 text-emerald-900 dark:bg-emerald-900 dark:text-emerald-100'
+												: 'bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400',
+										]"
+									>
+										{{ view.count }}
+									</span>
+								</div>
+							</button>
+						</div>
+					</div>
+
+					<!-- Other Views: Trash -->
+					<div class="space-y-0.5">
+						<button
+							v-for="view in otherViews"
+							:key="view.id"
+							type="button"
+							@click="handleSelectSmartView(view.id)"
+							:title="view.name"
+							class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer text-left"
+							:class="[
+								listStore.activeView === view.id && !filterStore.selectedTag
+									? 'bg-emerald-100/70 text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200'
+									: 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900',
+							]"
+						>
+							<div class="flex items-center gap-2.5 min-w-0">
+								<component :is="view.icon" class="w-4 h-4 shrink-0" :class="view.iconColor" />
+								<span class="truncate">{{ view.name }}</span>
+							</div>
+
+							<div class="flex items-center gap-1.5 shrink-0">
+								<span
+									v-if="view.count > 0"
+									class="text-xs font-semibold px-1.5 py-0.2 rounded-full"
+									:class="[
+										listStore.activeView === view.id && !filterStore.selectedTag
+											? 'bg-emerald-200 text-emerald-900 dark:bg-emerald-900 dark:text-emerald-100'
+											: 'bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400',
+									]"
+								>
+									{{ view.count }}
+								</span>
+							</div>
+						</button>
+					</div>
 				</div>
 			</div>
 
@@ -489,8 +652,9 @@ async function handleDeleteList(event: MouseEvent, id: string) {
 						]"
 					>
 						<div class="flex items-center gap-2 min-w-0">
-							<TagIcon class="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-							<span class="truncate">#{{ tag.name }}</span>
+							<AtSign v-if="tag.name.startsWith('@')" class="w-3.5 h-3.5 text-amber-500 shrink-0" />
+							<TagIcon v-else class="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+							<span class="truncate">{{ formatTagLabel(tag.name) }}</span>
 						</div>
 
 						<!-- Incomplete task count for this tag -->

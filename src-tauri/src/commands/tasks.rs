@@ -1,3 +1,11 @@
+//! Task management commands and semantics.
+//!
+//! # Soft-Delete & Restore Semantics
+//! Soft deletion sets `deleted_at = now` recursively for task and descendants while preserving
+//! notes, reminders, and tag associations for trash inspection or potential restoration.
+//! Hard deletion or purge permanently deletes task and cascades deletion of child notes,
+//! reminders, and tag links.
+//!
 use libsql::{params, Connection};
 use tauri::State;
 use uuid::Uuid;
@@ -97,6 +105,30 @@ pub async fn get_tasks_impl(
 
     if let Some(v) = &view {
         match v.trim().to_lowercase().as_str() {
+            "inbox" => {
+                if !include_completed {
+                    conditions.push("t.completed = 0".to_string());
+                }
+                conditions.push("t.list_id = (SELECT id FROM lists WHERE lower(name) = 'inbox' AND deleted_at IS NULL LIMIT 1)".to_string());
+            }
+            "next_actions" => {
+                if !include_completed {
+                    conditions.push("t.completed = 0".to_string());
+                }
+                conditions.push("(t.list_id NOT IN (SELECT id FROM lists WHERE lower(name) IN ('waiting on', 'someday/maybe', 'someday') AND deleted_at IS NULL) AND t.id NOT IN (SELECT tt.task_id FROM task_tags tt JOIN tags tg ON tt.tag_id = tg.id WHERE lower(tg.name) LIKE '%waiting%' OR lower(tg.name) LIKE '%someday%') AND (t.due IS NULL OR date(t.due) <= date('now', 'localtime') OR t.list_id = (SELECT id FROM lists WHERE lower(name) = 'next actions' AND deleted_at IS NULL LIMIT 1)))".to_string());
+            }
+            "waiting_on" => {
+                if !include_completed {
+                    conditions.push("t.completed = 0".to_string());
+                }
+                conditions.push("(t.list_id IN (SELECT id FROM lists WHERE lower(name) = 'waiting on' AND deleted_at IS NULL) OR t.id IN (SELECT tt.task_id FROM task_tags tt JOIN tags tg ON tt.tag_id = tg.id WHERE lower(tg.name) LIKE '%waiting%'))".to_string());
+            }
+            "someday_maybe" => {
+                if !include_completed {
+                    conditions.push("t.completed = 0".to_string());
+                }
+                conditions.push("(t.list_id IN (SELECT id FROM lists WHERE lower(name) IN ('someday/maybe', 'someday') AND deleted_at IS NULL) OR t.id IN (SELECT tt.task_id FROM task_tags tt JOIN tags tg ON tt.tag_id = tg.id WHERE lower(tg.name) LIKE '%someday%'))".to_string());
+            }
             "today" => {
                 if include_completed {
                     conditions.push("(t.due IS NOT NULL AND ((t.completed = 0 AND date(t.due) <= date('now', 'localtime')) OR (t.completed = 1 AND (date(t.due) = date('now', 'localtime') OR (date(t.due) <= date('now', 'localtime') AND date(t.completed_at, 'localtime') = date('now', 'localtime'))))))".to_string());
@@ -218,6 +250,36 @@ pub async fn fetch_task_by_id(conn: &Connection, id: &str) -> Result<Option<Task
         "SELECT {}
          FROM tasks
          WHERE id = ?1 AND deleted_at IS NULL",
+        TASK_SELECT_COLS
+    );
+
+    let mut rows = conn
+        .query(&query, params![id.to_string()])
+        .await
+        .map_err(|e| format!("Failed to query task: {}", e))?;
+
+    if let Some(row) = rows
+        .next()
+        .await
+        .map_err(|e| format!("Failed to read task row: {}", e))?
+    {
+        let mut task = row_to_task(&row).map_err(|e| format!("Failed to parse task: {}", e))?;
+        let mut tags_map = fetch_tags_for_task_ids(conn, &[task.id.clone()]).await?;
+        task.tags = tags_map.remove(&task.id).unwrap_or_default();
+        Ok(Some(task))
+    } else {
+        Ok(None)
+    }
+}
+
+pub async fn fetch_task_by_id_include_deleted(
+    conn: &Connection,
+    id: &str,
+) -> Result<Option<Task>, String> {
+    let query = format!(
+        "SELECT {}
+         FROM tasks
+         WHERE id = ?1",
         TASK_SELECT_COLS
     );
 
@@ -623,8 +685,9 @@ pub async fn update_task(state: State<'_, DbState>, task: UpdateTaskInput) -> Re
 pub async fn delete_task_impl(conn: &Connection, id: String) -> Result<(), String> {
     let now = now_iso();
     // Soft delete task and all its descendant subtasks recursively
-    conn.execute(
-        "WITH RECURSIVE descendants AS (
+    let rows = conn
+        .execute(
+            "WITH RECURSIVE descendants AS (
             SELECT id FROM tasks WHERE id = ?1
             UNION ALL
             SELECT t.id FROM tasks t INNER JOIN descendants d ON t.parent_id = d.id
@@ -632,10 +695,14 @@ pub async fn delete_task_impl(conn: &Connection, id: String) -> Result<(), Strin
         UPDATE tasks
         SET deleted_at = ?2, updated_at = ?2
         WHERE id IN (SELECT id FROM descendants) AND deleted_at IS NULL",
-        params![id, now],
-    )
-    .await
-    .map_err(|e| format!("Failed to recursively soft-delete task: {}", e))?;
+            params![id.clone(), now],
+        )
+        .await
+        .map_err(|e| format!("Failed to recursively soft-delete task: {}", e))?;
+
+    if rows == 0 {
+        return Err(format!("Task with ID '{}' not found or already deleted", id));
+    }
 
     Ok(())
 }
@@ -649,6 +716,10 @@ pub async fn batch_delete_tasks_impl(conn: &Connection, ids: Vec<String>) -> Res
         return Ok(());
     }
     let now = now_iso();
+    conn.execute("BEGIN TRANSACTION", ())
+        .await
+        .map_err(|e| format!("Failed to begin transaction: {}", e))?;
+
     for chunk in ids.chunks(500) {
         let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         let sql = format!(
@@ -669,10 +740,16 @@ pub async fn batch_delete_tasks_impl(conn: &Connection, ids: Vec<String>) -> Res
         params.push(libsql::Value::Text(now.clone()));
         params.push(libsql::Value::Text(now.clone()));
 
-        conn.execute(&sql, params)
-            .await
-            .map_err(|e| format!("Failed to recursively soft-delete tasks in batch: {}", e))?;
+        if let Err(e) = conn.execute(&sql, params).await {
+            let _ = conn.execute("ROLLBACK", ()).await;
+            return Err(format!("Failed to recursively soft-delete tasks in batch: {}", e));
+        }
     }
+
+    conn.execute("COMMIT", ())
+        .await
+        .map_err(|e| format!("Failed to commit transaction: {}", e))?;
+
     Ok(())
 }
 
@@ -682,6 +759,166 @@ pub async fn batch_delete_tasks(
     ids: Vec<String>,
 ) -> Result<(), String> {
     batch_delete_tasks_impl(&state.conn, ids).await
+}
+
+pub async fn restore_task_impl(conn: &Connection, id: String) -> Result<Task, String> {
+    let task = fetch_task_by_id_include_deleted(conn, &id).await?;
+    let task = match task {
+        Some(t) => t,
+        None => return Err(format!("Task with ID '{}' not found", id)),
+    };
+
+    let target_deleted_at = match task.deleted_at {
+        Some(d) => d,
+        None => {
+            // Already active / not deleted
+            return Ok(task);
+        }
+    };
+
+    let now = now_iso();
+
+    // Restore this task and any descendant subtasks that were soft-deleted in the exact same operation
+    conn.execute(
+        "WITH RECURSIVE to_restore AS (
+            SELECT id FROM tasks WHERE id = ?1
+            UNION ALL
+            SELECT t.id FROM tasks t INNER JOIN to_restore r ON t.parent_id = r.id
+        )
+        UPDATE tasks
+        SET deleted_at = NULL, updated_at = ?2
+        WHERE id IN (SELECT id FROM to_restore) AND deleted_at = ?3",
+        params![id.clone(), now, target_deleted_at],
+    )
+    .await
+    .map_err(|e| format!("Failed to restore task: {}", e))?;
+
+    fetch_task_by_id(conn, &id)
+        .await?
+        .ok_or_else(|| format!("Task with ID '{}' not found after restore", id))
+}
+
+#[tauri::command]
+pub async fn restore_task(state: State<'_, DbState>, id: String) -> Result<Task, String> {
+    restore_task_impl(&state.conn, id).await
+}
+
+pub async fn batch_restore_tasks_impl(
+    conn: &Connection,
+    ids: Vec<String>,
+) -> Result<Vec<Task>, String> {
+    let mut restored = Vec::new();
+    for id in ids {
+        if let Ok(task) = restore_task_impl(conn, id).await {
+            restored.push(task);
+        }
+    }
+    Ok(restored)
+}
+
+#[tauri::command]
+pub async fn batch_restore_tasks(
+    state: State<'_, DbState>,
+    ids: Vec<String>,
+) -> Result<Vec<Task>, String> {
+    batch_restore_tasks_impl(&state.conn, ids).await
+}
+
+pub async fn purge_old_deleted_tasks_impl(conn: &Connection, days: i64) -> Result<usize, String> {
+    if days < 0 {
+        return Err("Days must be non-negative".to_string());
+    }
+
+    let cutoff = (chrono::Utc::now() - chrono::Duration::days(days))
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+
+    conn.execute_batch(
+        "CREATE TEMPORARY TABLE IF NOT EXISTS _purge_task_ids (id TEXT PRIMARY KEY);
+         DELETE FROM _purge_task_ids;",
+    )
+    .await
+    .map_err(|e| format!("Failed to create temp purge table: {}", e))?;
+
+    conn.execute(
+        "WITH RECURSIVE to_purge AS (
+            SELECT id FROM tasks WHERE deleted_at IS NOT NULL AND deleted_at < ?1
+            UNION
+            SELECT t.id FROM tasks t INNER JOIN to_purge p ON t.parent_id = p.id
+            WHERE t.deleted_at IS NOT NULL AND t.deleted_at < ?1
+        )
+        INSERT OR IGNORE INTO _purge_task_ids (id)
+        SELECT id FROM to_purge",
+        params![cutoff],
+    )
+    .await
+    .map_err(|e| format!("Failed to populate purge tasks: {}", e))?;
+
+    let count: i64 = {
+        let mut rows = conn
+            .query("SELECT COUNT(*) FROM _purge_task_ids", ())
+            .await
+            .map_err(|e| format!("Failed to count purge tasks: {}", e))?;
+        if let Some(row) = rows
+            .next()
+            .await
+            .map_err(|e| format!("Failed to read count: {}", e))?
+        {
+            row.get(0).unwrap_or(0)
+        } else {
+            0
+        }
+    };
+
+    if count > 0 {
+        conn.execute(
+            "DELETE FROM task_tags WHERE task_id IN (SELECT id FROM _purge_task_ids)",
+            (),
+        )
+        .await
+        .map_err(|e| format!("Failed to delete purged task tags: {}", e))?;
+
+        conn.execute(
+            "DELETE FROM notes WHERE task_id IN (SELECT id FROM _purge_task_ids)",
+            (),
+        )
+        .await
+        .map_err(|e| format!("Failed to delete purged notes: {}", e))?;
+
+        conn.execute(
+            "DELETE FROM reminders WHERE task_id IN (SELECT id FROM _purge_task_ids)",
+            (),
+        )
+        .await
+        .map_err(|e| format!("Failed to delete purged reminders: {}", e))?;
+
+        conn.execute(
+            "UPDATE tasks SET parent_id = NULL WHERE parent_id IN (SELECT id FROM _purge_task_ids)",
+            (),
+        )
+        .await
+        .map_err(|e| format!("Failed to unlink tasks pointing to purged parents: {}", e))?;
+
+        conn.execute(
+            "DELETE FROM tasks WHERE id IN (SELECT id FROM _purge_task_ids)",
+            (),
+        )
+        .await
+        .map_err(|e| format!("Failed to delete purged tasks: {}", e))?;
+    }
+
+    conn.execute_batch("DROP TABLE IF EXISTS _purge_task_ids;")
+        .await
+        .map_err(|e| format!("Failed to drop temp purge table: {}", e))?;
+
+    Ok(count as usize)
+}
+
+#[tauri::command]
+pub async fn purge_old_deleted_tasks(
+    state: State<'_, DbState>,
+    days: i64,
+) -> Result<usize, String> {
+    purge_old_deleted_tasks_impl(&state.conn, days).await
 }
 
 
@@ -1229,7 +1466,7 @@ mod tests {
                 let lists = get_lists_impl(conn2)
                     .await
                     .expect("get lists after restart");
-                assert_eq!(lists.len(), 2);
+                assert_eq!(lists.len(), 5);
                 assert!(lists.iter().any(|l| l.name == "Inbox"));
                 let proj_list = lists
                     .iter()
@@ -1459,6 +1696,98 @@ mod tests {
             .expect("get overdue tasks");
             assert_eq!(overdue_tasks.len(), 1);
             assert_eq!(overdue_tasks[0].title, "Overdue task");
+
+            let _ = std::fs::remove_dir_all(temp_dir);
+        });
+    }
+
+    #[test]
+    fn test_gtd_views() {
+        tauri::async_runtime::block_on(async {
+            let (conn, temp_dir) = setup_test_conn().await;
+
+            let lists = get_lists_impl(&conn).await.expect("get lists");
+            let inbox = lists.iter().find(|l| l.name.to_lowercase() == "inbox").unwrap();
+            let next_actions_list = lists.iter().find(|l| l.name.to_lowercase() == "next actions").unwrap();
+            let waiting_on_list = lists.iter().find(|l| l.name.to_lowercase() == "waiting on").unwrap();
+            let someday_list = lists.iter().find(|l| l.name.to_lowercase() == "someday/maybe").unwrap();
+
+            let waiting_tag = create_tag_impl(&conn, "waiting-feedback".to_string(), None).await.unwrap();
+            let someday_tag = create_tag_impl(&conn, "someday-read".to_string(), None).await.unwrap();
+
+            // Task 1: in inbox, no due date -> Next Action & Inbox
+            let t_inbox = create_task_impl(&conn, inbox.id.clone(), "Inbox undated".to_string(), None, None, None).await.unwrap();
+
+            // Task 2: in Next actions list, far future due date -> Next Action (by list), not in inbox
+            let future_due = chrono::Local::now().checked_add_signed(chrono::Duration::days(30)).unwrap().format("%Y-%m-%d").to_string();
+            let t_next = create_task_impl(&conn, next_actions_list.id.clone(), "Next far future".to_string(), Some(future_due.clone()), None, None).await.unwrap();
+
+            // Task 3: in inbox, due today -> Next Action & Inbox
+            let today_due = chrono::Local::now().format("%Y-%m-%d").to_string();
+            let t_today = create_task_impl(&conn, inbox.id.clone(), "Today inbox".to_string(), Some(today_due), None, None).await.unwrap();
+
+            // Task 4: in inbox, far future due date -> NOT in Next Action (future due, not in next actions list)
+            let _t_future = create_task_impl(&conn, inbox.id.clone(), "Future inbox".to_string(), Some(future_due), None, None).await.unwrap();
+
+            // Task 5: in Waiting on list -> Waiting On, NOT Next Action
+            let t_wait_list = create_task_impl(&conn, waiting_on_list.id.clone(), "Waiting list task".to_string(), None, None, None).await.unwrap();
+
+            // Task 6: in inbox with waiting tag -> Waiting On, NOT Next Action
+            let t_wait_tag = create_task_impl(&conn, inbox.id.clone(), "Waiting tag task".to_string(), None, None, None).await.unwrap();
+            assign_tag_impl(&conn, t_wait_tag.id.clone(), waiting_tag.id.clone()).await.unwrap();
+
+            // Task 7: in Someday/Maybe list -> Someday/Maybe, NOT Next Action
+            let t_someday_list = create_task_impl(&conn, someday_list.id.clone(), "Someday list task".to_string(), None, None, None).await.unwrap();
+
+            // Task 8: in inbox with someday tag -> Someday/Maybe, NOT Next Action
+            let t_someday_tag = create_task_impl(&conn, inbox.id.clone(), "Someday tag task".to_string(), None, None, None).await.unwrap();
+            assign_tag_impl(&conn, t_someday_tag.id.clone(), someday_tag.id.clone()).await.unwrap();
+
+            // Task 9: Completed task in inbox
+            let t_comp = create_task_impl(&conn, inbox.id.clone(), "Completed inbox task".to_string(), None, None, None).await.unwrap();
+            toggle_task_complete_impl(&conn, t_comp.id.clone(), true).await.unwrap();
+
+            // 1. Inbox view: incomplete only
+            let inbox_tasks = get_tasks_impl(&conn, None, Some(false), Some("inbox".to_string()), None, None, None, None).await.unwrap();
+            let inbox_ids: Vec<String> = inbox_tasks.into_iter().map(|t| t.id).collect();
+            assert!(inbox_ids.contains(&t_inbox.id));
+            assert!(inbox_ids.contains(&t_today.id));
+            assert!(!inbox_ids.contains(&t_next.id));
+            assert!(!inbox_ids.contains(&t_wait_list.id));
+            assert!(!inbox_ids.contains(&t_someday_list.id));
+            assert!(!inbox_ids.contains(&t_comp.id));
+
+            // Inbox view: include completed
+            let inbox_all = get_tasks_impl(&conn, None, Some(true), Some("inbox".to_string()), None, None, None, None).await.unwrap();
+            let inbox_all_ids: Vec<String> = inbox_all.into_iter().map(|t| t.id).collect();
+            assert!(inbox_all_ids.contains(&t_comp.id));
+
+            // 2. Next actions view
+            let next_tasks = get_tasks_impl(&conn, None, Some(false), Some("next_actions".to_string()), None, None, None, None).await.unwrap();
+            let next_ids: Vec<String> = next_tasks.into_iter().map(|t| t.id).collect();
+            assert!(next_ids.contains(&t_inbox.id));
+            assert!(next_ids.contains(&t_next.id));
+            assert!(next_ids.contains(&t_today.id));
+            assert!(!next_ids.contains(&t_wait_list.id));
+            assert!(!next_ids.contains(&t_wait_tag.id));
+            assert!(!next_ids.contains(&t_someday_list.id));
+            assert!(!next_ids.contains(&t_someday_tag.id));
+            assert!(!next_ids.contains(&t_comp.id));
+
+            // 3. Waiting on view
+            let waiting_tasks = get_tasks_impl(&conn, None, Some(false), Some("waiting_on".to_string()), None, None, None, None).await.unwrap();
+            let waiting_ids: Vec<String> = waiting_tasks.into_iter().map(|t| t.id).collect();
+            assert!(waiting_ids.contains(&t_wait_list.id));
+            assert!(waiting_ids.contains(&t_wait_tag.id));
+            assert!(!waiting_ids.contains(&t_inbox.id));
+            assert!(!next_ids.contains(&t_wait_list.id));
+
+            // 4. Someday/Maybe view
+            let someday_tasks = get_tasks_impl(&conn, None, Some(false), Some("someday_maybe".to_string()), None, None, None, None).await.unwrap();
+            let someday_ids: Vec<String> = someday_tasks.into_iter().map(|t| t.id).collect();
+            assert!(someday_ids.contains(&t_someday_list.id));
+            assert!(someday_ids.contains(&t_someday_tag.id));
+            assert!(!someday_ids.contains(&t_inbox.id));
 
             let _ = std::fs::remove_dir_all(temp_dir);
         });
@@ -2130,6 +2459,457 @@ mod tests {
             assert_eq!(fetched_task.tags.len(), 2);
             let tag_names: Vec<String> = fetched_task.tags.iter().map(|t| t.name.clone()).collect();
             assert_eq!(tag_names, vec!["backend", "urgent"]);
+
+            let _ = std::fs::remove_dir_all(temp_dir);
+        });
+    }
+
+    #[test]
+    fn test_restore_task_timestamp_scoping() {
+        tauri::async_runtime::block_on(async {
+            let (conn, temp_dir) = setup_test_conn().await;
+            let list = create_list_impl(&conn, "Test List".to_string(), None, None)
+                .await
+                .expect("create list");
+
+            let parent = create_task_impl(&conn, list.id.clone(), "Parent Task".to_string(), None, None, None)
+                .await
+                .expect("create parent");
+            let subtask1 = create_task_impl(&conn, list.id.clone(), "Subtask 1 (early deleted)".to_string(), None, None, Some(parent.id.clone()))
+                .await
+                .expect("create subtask 1");
+            let subtask2 = create_task_impl(&conn, list.id.clone(), "Subtask 2 (batch deleted)".to_string(), None, None, Some(parent.id.clone()))
+                .await
+                .expect("create subtask 2");
+
+            // 1. Delete subtask 1 earlier at T1
+            conn.execute(
+                "UPDATE tasks SET deleted_at = '2026-09-01T10:00:00.000Z', updated_at = '2026-09-01T10:00:00.000Z' WHERE id = ?1",
+                libsql::params![subtask1.id.clone()],
+            )
+            .await
+            .unwrap();
+
+            // 2. Delete parent (and active subtask 2) at T2
+            conn.execute(
+                "UPDATE tasks SET deleted_at = '2026-09-10T12:00:00.000Z', updated_at = '2026-09-10T12:00:00.000Z' WHERE id IN (?1, ?2)",
+                libsql::params![parent.id.clone(), subtask2.id.clone()],
+            )
+            .await
+            .unwrap();
+
+            // Both parent and subtask 2 are deleted, and subtask 1 was already deleted
+            assert!(fetch_task_by_id(&conn, &parent.id).await.unwrap().is_none());
+            assert!(fetch_task_by_id(&conn, &subtask1.id).await.unwrap().is_none());
+            assert!(fetch_task_by_id(&conn, &subtask2.id).await.unwrap().is_none());
+
+            // 3. Restore parent
+            let restored_parent = restore_task_impl(&conn, parent.id.clone())
+                .await
+                .expect("restore parent");
+            assert_eq!(restored_parent.id, parent.id);
+            assert!(restored_parent.deleted_at.is_none());
+
+            // Subtask 2 was deleted in same batch -> must be restored
+            let fetched_sub2 = fetch_task_by_id(&conn, &subtask2.id).await.unwrap().expect("subtask 2 restored");
+            assert!(fetched_sub2.deleted_at.is_none());
+
+            // Subtask 1 was deleted earlier -> MUST REMAIN IN TRASH
+            let fetched_sub1 = fetch_task_by_id(&conn, &subtask1.id).await.unwrap();
+            assert!(fetched_sub1.is_none(), "Subtask 1 should still be soft-deleted");
+            let sub1_raw = fetch_task_by_id_include_deleted(&conn, &subtask1.id).await.unwrap().unwrap();
+            assert_eq!(sub1_raw.deleted_at, Some("2026-09-01T10:00:00.000Z".to_string()));
+
+            let _ = std::fs::remove_dir_all(temp_dir);
+        });
+    }
+
+    #[test]
+    fn test_purge_old_deleted_tasks_fk_safety() {
+        tauri::async_runtime::block_on(async {
+            let (conn, temp_dir) = setup_test_conn().await;
+            let list = create_list_impl(&conn, "Purge List".to_string(), None, None)
+                .await
+                .expect("create list");
+
+            let parent = create_task_impl(&conn, list.id.clone(), "Old Parent".to_string(), None, None, None)
+                .await
+                .expect("create parent");
+            let child = create_task_impl(&conn, list.id.clone(), "Live Child".to_string(), None, None, Some(parent.id.clone()))
+                .await
+                .expect("create child");
+
+            let tag = create_tag_impl(&conn, "purgetag".to_string(), None).await.unwrap();
+            assign_tag_impl(&conn, parent.id.clone(), tag.id.clone()).await.unwrap();
+            crate::commands::notes::add_note_impl(&conn, parent.id.clone(), "content".to_string(), Some("title".to_string())).await.unwrap();
+            crate::commands::reminders::add_reminder_impl(&conn, parent.id.clone(), "2026-10-01T12:00:00Z".to_string(), None, None, None).await.unwrap();
+
+            let recent_deleted = create_task_impl(&conn, list.id.clone(), "Recent Deleted".to_string(), None, None, None)
+                .await
+                .expect("create recent deleted");
+
+            // Soft delete parent 40 days ago
+            conn.execute(
+                "UPDATE tasks SET deleted_at = '2026-01-01T00:00:00.000Z', updated_at = '2026-01-01T00:00:00.000Z' WHERE id = ?1",
+                libsql::params![parent.id.clone()],
+            )
+            .await
+            .unwrap();
+
+            // Soft delete recent_deleted 2 days ago
+            let two_days_ago = (chrono::Utc::now() - chrono::Duration::days(2))
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+            conn.execute(
+                "UPDATE tasks SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
+                libsql::params![recent_deleted.id.clone(), two_days_ago],
+            )
+            .await
+            .unwrap();
+
+            // Child is LIVE: deleted_at is None
+            assert!(child.deleted_at.is_none());
+
+            // Purge tasks older than 30 days
+            let purged_count = purge_old_deleted_tasks_impl(&conn, 30).await.expect("purge failed");
+            assert_eq!(purged_count, 1);
+
+            // Old parent is completely gone from DB
+            let parent_check = fetch_task_by_id_include_deleted(&conn, &parent.id).await.unwrap();
+            assert!(parent_check.is_none(), "Old parent should be permanently purged");
+
+            // Live child MUST survive, with parent_id set to NULL to prevent dangling FK
+            let child_check = fetch_task_by_id(&conn, &child.id).await.unwrap().expect("Child must survive");
+            assert_eq!(child_check.parent_id, None, "Child parent_id should be unlinked");
+
+            // Recent deleted task must still be in DB (soft-deleted, not purged)
+            let recent_check = fetch_task_by_id_include_deleted(&conn, &recent_deleted.id).await.unwrap();
+            assert!(recent_check.is_some(), "Recent deleted task must NOT be purged");
+
+            let _ = std::fs::remove_dir_all(temp_dir);
+        });
+    }
+
+    #[test]
+    fn test_delete_task_unknown_id_returns_error() {
+        tauri::async_runtime::block_on(async {
+            let (conn, temp_dir) = setup_test_conn().await;
+            let list = create_list_impl(&conn, "Test List".to_string(), None, None)
+                .await
+                .expect("create list");
+
+            // Nonexistent ID returns error
+            let non_existent_id = "non-existent-task-id";
+            let err = delete_task_impl(&conn, non_existent_id.to_string())
+                .await
+                .expect_err("deleting nonexistent task must fail");
+            assert_eq!(
+                err,
+                format!("Task with ID '{}' not found or already deleted", non_existent_id)
+            );
+
+            // Create and delete an existing task
+            let task = create_task_impl(
+                &conn,
+                list.id.clone(),
+                "Task to delete".to_string(),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("create task");
+
+            delete_task_impl(&conn, task.id.clone())
+                .await
+                .expect("first delete must succeed");
+
+            // Deleting the already deleted task ID returns error
+            let err2 = delete_task_impl(&conn, task.id.clone())
+                .await
+                .expect_err("deleting already deleted task must fail");
+            assert_eq!(
+                err2,
+                format!("Task with ID '{}' not found or already deleted", task.id)
+            );
+
+            let _ = std::fs::remove_dir_all(temp_dir);
+        });
+    }
+
+    #[test]
+    fn test_delete_task_recursive_subtasks() {
+        tauri::async_runtime::block_on(async {
+            let (conn, temp_dir) = setup_test_conn().await;
+            let list = create_list_impl(&conn, "Hierarchy List".to_string(), None, None)
+                .await
+                .expect("create list");
+
+            // Create parent -> child (subtask) -> grandchild (sub-subtask)
+            let parent = create_task_impl(
+                &conn,
+                list.id.clone(),
+                "Parent Task".to_string(),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("create parent");
+
+            let child = create_task_impl(
+                &conn,
+                list.id.clone(),
+                "Child Subtask".to_string(),
+                None,
+                None,
+                Some(parent.id.clone()),
+            )
+            .await
+            .expect("create child");
+
+            let grandchild = create_task_impl(
+                &conn,
+                list.id.clone(),
+                "Grandchild Subtask".to_string(),
+                None,
+                None,
+                Some(child.id.clone()),
+            )
+            .await
+            .expect("create grandchild");
+
+            let sibling = create_task_impl(
+                &conn,
+                list.id.clone(),
+                "Sibling Task".to_string(),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("create sibling");
+
+            // Delete parent
+            delete_task_impl(&conn, parent.id.clone())
+                .await
+                .expect("delete parent task");
+
+            // Parent, child, and grandchild must all have deleted_at set
+            let parent_row = fetch_task_by_id_include_deleted(&conn, &parent.id)
+                .await
+                .unwrap()
+                .expect("parent found");
+            assert!(parent_row.deleted_at.is_some(), "parent must be soft-deleted");
+
+            let child_row = fetch_task_by_id_include_deleted(&conn, &child.id)
+                .await
+                .unwrap()
+                .expect("child found");
+            assert!(child_row.deleted_at.is_some(), "child must be soft-deleted");
+
+            let grandchild_row = fetch_task_by_id_include_deleted(&conn, &grandchild.id)
+                .await
+                .unwrap()
+                .expect("grandchild found");
+            assert!(grandchild_row.deleted_at.is_some(), "grandchild must be soft-deleted");
+
+            // Sibling task must remain active
+            let sibling_row = fetch_task_by_id(&conn, &sibling.id)
+                .await
+                .unwrap()
+                .expect("sibling found");
+            assert!(sibling_row.deleted_at.is_none(), "sibling must remain active");
+
+            let _ = std::fs::remove_dir_all(temp_dir);
+        });
+    }
+
+    #[test]
+    fn test_delete_task_preserves_metadata() {
+        tauri::async_runtime::block_on(async {
+            let (conn, temp_dir) = setup_test_conn().await;
+            let list = create_list_impl(&conn, "Metadata List".to_string(), None, None)
+                .await
+                .expect("create list");
+
+            let task = create_task_impl(
+                &conn,
+                list.id.clone(),
+                "Task with metadata".to_string(),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("create task");
+
+            // Add note
+            let note = add_note_impl(
+                &conn,
+                task.id.clone(),
+                "Important note content".to_string(),
+                Some("Note Title".to_string()),
+            )
+            .await
+            .expect("add note");
+
+            // Add reminder
+            let reminder = crate::commands::reminders::add_reminder_impl(
+                &conn,
+                task.id.clone(),
+                "2026-10-01T09:00:00Z".to_string(),
+                None,
+                None,
+                Some("Check task".to_string()),
+            )
+            .await
+            .expect("add reminder");
+
+            // Add tag
+            let tag = create_tag_impl(&conn, "meta-tag".to_string(), Some("#ff0000".to_string()))
+                .await
+                .expect("create tag");
+            assign_tag_impl(&conn, task.id.clone(), tag.id.clone())
+                .await
+                .expect("assign tag");
+
+            // Soft-delete the task
+            delete_task_impl(&conn, task.id.clone())
+                .await
+                .expect("delete task");
+
+            // Verify task is soft-deleted
+            let task_check = fetch_task_by_id_include_deleted(&conn, &task.id)
+                .await
+                .unwrap()
+                .expect("task exists");
+            assert!(task_check.deleted_at.is_some());
+
+            // 1. Notes preserved
+            let notes = get_notes_impl(&conn, task.id.clone())
+                .await
+                .expect("get notes");
+            assert_eq!(notes.len(), 1);
+            assert_eq!(notes[0].id, note.id);
+            assert_eq!(notes[0].content, "Important note content");
+            assert!(notes[0].deleted_at.is_none());
+
+            // 2. Reminders preserved
+            let reminders = crate::commands::reminders::get_reminders_impl(&conn, task.id.clone())
+                .await
+                .expect("get reminders");
+            assert_eq!(reminders.len(), 1);
+            assert_eq!(reminders[0].id, reminder.id);
+            assert_eq!(reminders[0].trigger, "2026-10-01T09:00:00Z");
+            assert!(reminders[0].deleted_at.is_none());
+
+            // 3. Tag associations preserved
+            let tags_map = fetch_tags_for_task_ids(&conn, &[task.id.clone()])
+                .await
+                .expect("fetch tags");
+            let task_tags = tags_map.get(&task.id).expect("task tags exist");
+            assert_eq!(task_tags.len(), 1);
+            assert_eq!(task_tags[0].id, tag.id);
+            assert_eq!(task_tags[0].name, "meta-tag");
+            assert!(task_tags[0].deleted_at.is_none());
+
+            let _ = std::fs::remove_dir_all(temp_dir);
+        });
+    }
+
+    #[test]
+    fn test_batch_delete_tasks_atomic_transaction() {
+        tauri::async_runtime::block_on(async {
+            let (conn, temp_dir) = setup_test_conn().await;
+            let list = create_list_impl(&conn, "Batch List".to_string(), None, None)
+                .await
+                .expect("create list");
+
+            // Create parent 1 with subtask 1
+            let parent1 = create_task_impl(&conn, list.id.clone(), "Batch P1".to_string(), None, None, None)
+                .await
+                .expect("create p1");
+            let child1 = create_task_impl(&conn, list.id.clone(), "Batch C1".to_string(), None, None, Some(parent1.id.clone()))
+                .await
+                .expect("create c1");
+
+            // Create parent 2 with subtask 2
+            let parent2 = create_task_impl(&conn, list.id.clone(), "Batch P2".to_string(), None, None, None)
+                .await
+                .expect("create p2");
+            let child2 = create_task_impl(&conn, list.id.clone(), "Batch C2".to_string(), None, None, Some(parent2.id.clone()))
+                .await
+                .expect("create c2");
+
+            // Create parent 3 with subtask 3 (to remain active)
+            let parent3 = create_task_impl(&conn, list.id.clone(), "Batch P3".to_string(), None, None, None)
+                .await
+                .expect("create p3");
+            let child3 = create_task_impl(&conn, list.id.clone(), "Batch C3".to_string(), None, None, Some(parent3.id.clone()))
+                .await
+                .expect("create c3");
+
+            // Batch delete parent1 and parent2
+            batch_delete_tasks_impl(&conn, vec![parent1.id.clone(), parent2.id.clone()])
+                .await
+                .expect("batch delete succeeds");
+
+            // Check parent 1 & child 1 are soft-deleted
+            let p1_check = fetch_task_by_id_include_deleted(&conn, &parent1.id).await.unwrap().expect("p1 exists");
+            assert!(p1_check.deleted_at.is_some());
+            let c1_check = fetch_task_by_id_include_deleted(&conn, &child1.id).await.unwrap().expect("c1 exists");
+            assert!(c1_check.deleted_at.is_some());
+
+            // Check parent 2 & child 2 are soft-deleted
+            let p2_check = fetch_task_by_id_include_deleted(&conn, &parent2.id).await.unwrap().expect("p2 exists");
+            assert!(p2_check.deleted_at.is_some());
+            let c2_check = fetch_task_by_id_include_deleted(&conn, &child2.id).await.unwrap().expect("c2 exists");
+            assert!(c2_check.deleted_at.is_some());
+
+            // Check parent 3 & child 3 remain active
+            let p3_check = fetch_task_by_id(&conn, &parent3.id).await.unwrap().expect("p3 exists");
+            assert!(p3_check.deleted_at.is_none());
+            let c3_check = fetch_task_by_id(&conn, &child3.id).await.unwrap().expect("c3 exists");
+            assert!(c3_check.deleted_at.is_none());
+
+            // Empty batch does nothing and succeeds
+            batch_delete_tasks_impl(&conn, vec![])
+                .await
+                .expect("empty batch delete succeeds");
+
+            // Test rollback on failure
+            let fail_p1 = create_task_impl(&conn, list.id.clone(), "Rollback P1".to_string(), None, None, None)
+                .await
+                .expect("create fail_p1");
+            let fail_p2 = create_task_impl(&conn, list.id.clone(), "Rollback P2".to_string(), None, None, None)
+                .await
+                .expect("create fail_p2");
+
+            // Install trigger that fails when updating fail_p2
+            let trigger_sql = format!(
+                "CREATE TRIGGER test_batch_rollback_trigger
+                 BEFORE UPDATE OF deleted_at ON tasks
+                 FOR EACH ROW
+                 WHEN NEW.id = '{}'
+                 BEGIN
+                     SELECT RAISE(ABORT, 'forced trigger failure for rollback test');
+                 END;",
+                fail_p2.id
+            );
+            conn.execute(&trigger_sql, ()).await.expect("create trigger");
+
+            // Batch delete including fail_p1 and fail_p2 -> should fail and rollback
+            let batch_err = batch_delete_tasks_impl(&conn, vec![fail_p1.id.clone(), fail_p2.id.clone()])
+                .await
+                .expect_err("batch delete must fail due to trigger");
+            assert!(batch_err.contains("forced trigger failure for rollback test") || batch_err.contains("Failed to recursively soft-delete tasks in batch"));
+
+            // Both fail_p1 and fail_p2 must still NOT be deleted due to transaction rollback
+            let fail_p1_check = fetch_task_by_id(&conn, &fail_p1.id).await.unwrap().expect("fail_p1 exists");
+            assert!(fail_p1_check.deleted_at.is_none(), "fail_p1 must have been rolled back");
+
+            let fail_p2_check = fetch_task_by_id(&conn, &fail_p2.id).await.unwrap().expect("fail_p2 exists");
+            assert!(fail_p2_check.deleted_at.is_none(), "fail_p2 must not have been deleted");
 
             let _ = std::fs::remove_dir_all(temp_dir);
         });

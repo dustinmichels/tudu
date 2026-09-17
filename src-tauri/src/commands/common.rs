@@ -200,5 +200,9 @@ pub async fn setup_test_conn() -> (libsql::Connection, std::path::PathBuf) {
     let temp_dir = std::env::temp_dir().join(format!("tudu_cmd_test_{}", Uuid::new_v4()));
     let db_path = temp_dir.join("test.db");
     let state = crate::db::init_db(&db_path).await.expect("init_db failed");
+    // Clear demo tasks and seeded context tags so command unit tests start from a clean slate
+    state.conn.execute("DELETE FROM task_tags", ()).await.ok();
+    state.conn.execute("DELETE FROM tasks", ()).await.ok();
+    state.conn.execute("DELETE FROM tags WHERE name LIKE '@%'", ()).await.ok();
     (state.conn, temp_dir)
 }
